@@ -1,5 +1,5 @@
 # %% [markdown]
-    # # AF3 Output Analysis
+# AF3 Output Analysis
 
 # %%
 import pandas as pd
@@ -87,6 +87,8 @@ prediction_folders['TFIIH_P62_NTD'] = {
 # Dictionary to store results for all predictions
 all_results = {}
 
+
+
 # Analyze each prediction folder
 for prediction_name, config in prediction_folders.items():
     try:
@@ -131,6 +133,7 @@ for prediction_name, config in prediction_folders.items():
         
     except FileNotFoundError as e:
         print(f"Warning: Could not find files for {prediction_name}")
+        print(f"  Looking for: {json_path}")
     except Exception as e:
         print(f"Error analyzing {prediction_name}: {e}")
 
