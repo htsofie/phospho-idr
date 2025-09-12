@@ -1,6 +1,22 @@
-#%%
+#%% [markdown]
+## Notebooks setup and data config
+
 import pandas as pd
 import sys
+import yaml
+from pathlib import Path
+from pandas._config import config
+
+# set project root (phospho_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[1] if "__file__" in globals() else Path.cwd().parents[0]
+
+#Pick config manually here: (currently rat)
+config_path = PROJECT_ROOT / "configs/rat.yaml"
+
+with open(config_path) as f:
+    config = yaml.safe_load(f)
+
+print(config)
 
 #%%
 def search_uniprot_id(file_path, target_id):
@@ -86,9 +102,19 @@ if __name__ == "__main__":
 
 # %%
 # check # of missing value in both Uniprot and ENSEMBL
-df = pd.read_excel("../data/raw/rat/14rat_data.xls")
+df = pd.read_excel(config["raw_data"])
 missing_count = df[['Uniprot', 'ENSEMBL']].isna().all(axis=1).sum()
-print(f"Missing count Uniprot: {missing_count}")
+print(f"Missing count: {missing_count}")
 print(f"Total count: {len(df)}")
 print(f"Percentage of missing values: {missing_count / len(df) * 100:.2f}%")
-# %%
+
+# %% [markdown]
+# To look at range of values of localized prob to determine if all sites in dataset are localized or if there are some that need to be removed
+
+df = pd.read_excel(config["raw_data"])
+col = "Localization Prob"
+print("Min:", df[col].min())
+print("Max:", df[col].max())
+# Min is 0.745606 and Max is 1.0
+# No need to remove any since most are decently well localized >0.745
+
