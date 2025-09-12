@@ -1,0 +1,18 @@
+# Rat data configuration file
+
+# Raw data location
+raw_data: ../data/raw/rat/14rat_data.xls
+
+# Columns to keep from raw data
+columns_to_keep:
+  uniprot_id: Uniprot
+  ensembl_id: ENSEMBL
+  position: Position
+  localization_prob: "Localization Prob"
+  amino_acid: "Amino Acid"
+  sequence_window: "Sequence Window"
+  modified_sequence: "Modified Sequence"
+  
+# Data processing settings
+sample_size: 20
+random_state: 42

@@ -1,0 +1,171 @@
+# PHOSPHORYLATION PROJECT - REQUIREMENTS
+
+# This file contains all Python packages required for the project.
+# Install with: pip install -r requirements.txt
+
+
+# CORE DATA SCIENCE STACK
+# Essential packages for data manipulation and analysis
+pandas==2.0.3
+numpy==1.24.4
+matplotlib==3.7.5
+seaborn==0.13.2
+matplotlib-inline==0.1.7
+
+# FILE HANDLING & DATA I/O
+# Packages for reading/writing various file formats
+xlrd==2.0.2                    # Excel file reading (.xls, .xlsb)
+requests==2.32.4               # HTTP requests for API calls
+urllib3==2.2.3                 # HTTP client (requests dependency)
+certifi==2025.8.3              # SSL certificates
+charset-normalizer==3.4.3      # Character encoding detection
+idna==3.10                     # Internationalized domain names
+
+# JUPYTER ECOSYSTEM
+# Core Jupyter packages for interactive computing
+jupyter==1.1.1
+jupyterlab==4.3.8
+notebook==7.3.3
+jupyter_client==8.6.3
+jupyter_core==5.8.1
+jupyter_server==2.14.2
+jupyter_server_terminals==0.5.3
+jupyterlab_server==2.27.3
+
+# Jupyter extensions and widgets
+ipython==8.12.3
+ipykernel==6.29.5
+ipywidgets==8.1.7
+jupyterlab_widgets==3.0.15
+widgetsnbextension==4.0.14
+
+# Jupyter language server and LSP support
+jupyter-lsp==2.3.0
+jupyter-events==0.10.0
+
+# JUPYTER DEPENDENCIES
+# Supporting packages for Jupyter functionality
+nbconvert==7.16.6              # Notebook conversion
+nbformat==5.10.4               # Notebook format
+nbclient==0.10.1               # Notebook client
+jupyter-console==6.6.3         # Jupyter console
+notebook_shim==0.2.4           # Notebook compatibility
+
+# PLOTTING & VISUALIZATION DEPENDENCIES
+# Packages required by matplotlib and seaborn
+contourpy==1.1.1               # Contour plotting
+cycler==0.12.1                 # Color cycling
+kiwisolver==1.4.7              # Constraint solver
+pillow==10.4.0                 # Image processing
+fonttools==4.57.0              # Font manipulation
+
+# WEB & HTTP INFRASTRUCTURE
+# Packages for web-based Jupyter interface
+tornado==6.4.2                 # Web framework
+pyzmq==27.1.0                  # ZeroMQ messaging
+terminado==0.18.1              # Terminal emulation
+websocket-client==1.8.0        # WebSocket client
+h11==0.16.0                    # HTTP/1.1 protocol
+httpcore==1.0.9                # HTTP client
+httpx==0.28.1                  # HTTP client
+sniffio==1.3.1                 # Async library detection
+
+# DATA PROCESSING & UTILITIES
+# Packages for data manipulation and processing
+python-dateutil==2.9.0.post0  # Date/time utilities
+pytz==2025.2                   # Timezone handling
+tzdata==2025.2                 # Timezone data
+six==1.17.0                    # Python 2/3 compatibility
+zipp==3.20.2                   # Zipfile utilities
+packaging==25.0                # Package utilities
+
+# JSON & DATA FORMATS
+# Packages for handling various data formats
+PyYAML==6.0.2                  # YAML parsing
+json5==0.12.1                  # JSON5 parsing
+jsonschema==4.23.0             # JSON schema validation
+jsonschema-specifications==2023.12.1
+jsonpointer==3.0.0             # JSON pointer
+fastjsonschema==2.21.2         # Fast JSON schema validation
+referencing==0.35.1            # JSON reference resolution
+rpds-py==0.20.1                # Reference Python Data Structures
+
+# TEMPLATING & MARKUP
+# Packages for text processing and templating
+Jinja2==3.1.6                  # Template engine
+MarkupSafe==2.1.5              # Safe string handling
+mistune==3.1.4                 # Markdown parser
+bleach==6.1.0                  # HTML sanitization
+defusedxml==0.7.1              # XML security
+beautifulsoup4==4.13.5         # HTML/XML parsing
+soupsieve==2.7                 # CSS selector engine
+webencodings==0.5.1            # Web encoding detection
+tinycss2==1.2.1                # CSS parser
+webcolors==24.8.0              # Web color utilities
+
+# SYSTEM & PROCESS MANAGEMENT
+# Packages for system interaction and process management
+psutil==7.0.0                  # System and process utilities
+ptyprocess==0.7.0              # Pseudo-terminal process
+pexpect==4.9.0                 # Process spawning
+Send2Trash==1.8.3              # File deletion to trash
+
+# DEVELOPMENT & DEBUGGING
+# Packages for development and debugging
+debugpy==1.8.16                # Python debugger
+prometheus_client==0.21.1      # Metrics collection
+python-json-logger==3.3.0      # JSON logging
+
+# PYTHON LANGUAGE SUPPORT
+# Packages for Python language features and compatibility
+typing_extensions==4.13.2      # Type hints extensions
+importlib_metadata==8.5.0      # Metadata access
+importlib_resources==6.4.5     # Resource access
+pkgutil_resolve_name==1.3.10   # Package name resolution
+platformdirs==4.3.6            # Platform directories
+tomli==2.2.1                   # TOML parsing
+fqdn==1.5.1                    # FQDN validation
+isoduration==20.11.0           # ISO 8601 duration parsing
+rfc3339-validator==0.1.4       # RFC 3339 validation
+rfc3986-validator==0.1.1       # RFC 3986 validation
+uri-template==1.3.0            # URI template processing
+
+# ASYNC & CONCURRENCY
+# Packages for asynchronous programming
+anyio==4.5.2                   # Async I/O
+async-lru==2.0.4               # Async LRU cache
+nest-asyncio==1.6.0            # Nested asyncio support
+
+# SECURITY & AUTHENTICATION
+# Packages for security and authentication
+argon2-cffi==25.1.0            # Password hashing
+argon2-cffi-bindings==21.2.0   # Argon2 bindings
+cffi==1.17.1                   # C Foreign Function Interface
+pycparser==2.23                 # C parser
+
+# INTERACTIVE COMPUTING
+# Packages for interactive computing and REPL
+prompt_toolkit==3.0.52         # Command-line interface
+wcwidth==0.2.13                # Character width calculation
+backcall==0.2.0                # Callback utilities
+decorator==5.2.1               # Decorator utilities
+pickleshare==0.7.5             # Pickle sharing
+pure_eval==0.2.3               # Pure evaluation
+stack_data==0.6.3              # Stack data utilities
+traitlets==5.14.3              # Trait system
+comm==0.2.3                    # Communication protocol
+jedi==0.19.2                   # Code completion
+parso==0.8.5                   # Python parser
+executing==2.2.1               # Code execution
+asttokens==3.0.0               # AST tokenization
+
+# MISCELLANEOUS UTILITIES
+# Various utility packages
+arrow==1.3.0                   # Date/time manipulation
+babel==2.17.0                  # Internationalization
+attrs==25.3.0                  # Classes without boilerplate
+exceptiongroup==1.3.0          # Exception grouping
+overrides==7.7.0                # Method overriding
+pyparsing==3.1.4               # Parsing framework
+Pygments==2.19.2               # Syntax highlighting
+types-python-dateutil==2.9.0.20241206  # Type stubs
