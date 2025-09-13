@@ -35,43 +35,40 @@ source lab_env/bin/activate
 phospho_root/
 ├── data/                             # Data storage organized by species
 │   ├── raw/                          # Original data files
-│   │   ├── human/                    # Human phosphorylation data (empty)
 │   │   ├── rat/                      # Rat phosphorylation data
-│   │   │   └── 14rat_data.xls        # Rat phosphorylation sites dataset
+│   │   │   ├── 14rat_data.xls        # Rat phosphorylation sites dataset
+│   │   │   └── .~lock.14rat_data.xls# # Excel lock file
 │   │   └── mouse/                    # Mouse phosphorylation data
 │   │       └── Phosphomouse_phosphorylation_sites.xlsb
 │   └── processed/                    # Processed and cleaned data
-│       ├── human/                    # Human processed data (empty)
 │       ├── rat/                      # Rat processed data
 │       │   ├── test_data.csv         # Sample rat data
-│       │   └── test_data_cleaned.csv # Cleaned rat data
+│       │   ├── test_data_cleaned.csv # Cleaned rat data
+│       │   └── .~lock.test_data.csv# # Excel lock file
 │       └── mouse/                    # Mouse processed data
 │           ├── Phosphomouse_phosphorylation_sites.parquet
 │           └── cleaned_phosphomouse_site_data.parquet
 │
 ├── scripts/                          # Python scripts for data processing
 │   ├── convert_to_parquet.py         # Convert Excel files to Parquet format
-│   ├── enhanced_clean_data.py        # Clean and process phosphorylation data
-│   ├── fetch_sequences.py            # Fetch protein sequences from UniProt
 │   ├── gen_test_data.py              # Generate test datasets
-│   ├── merge_command.py              # Merge datasets with sequences
-│   └── old/                          # Archived scripts
-│       ├── enhanced_clean.py         # Previous version of data cleaning
-│       ├── get_full_seq.py           # Previous sequence fetching
-│       ├── merge_data.py             # Previous merge script
-│       └── README.md                 # Documentation for archived scripts
+│   ├── README.md                     # Scripts documentation
+│   └── old/                          # Archived scripts (empty)
 │
 ├── notebooks/                        # Jupyter notebooks and analysis scripts
-│   ├── read_data.py                  # Data reading and exploration
 │   ├── search_data.py                # UniProt ID search functionality
 │   └── README.md                     # Notebooks documentation
 │
-├── outputs/                          # Analysis results and reports
-│   └── cleaned_data_results.md       # Data cleaning summary report
+├── configs/                          # Configuration files
+│   └── rat.yaml                      # Rat data processing configuration
 │
-├── ab_env/                          # Python virtual environment
-│   └── ...                          # Virtual environment files
+├── lab_env/                         # Python virtual environment
+│   ├── bin/                         # Virtual environment executables
+│   ├── lib/                         # Python packages and libraries
+│   ├── etc/                         # Configuration files
+│   └── share/                       # Shared data and applications
 │
+├── .git/                            # Git repository metadata
 ├── requirements.txt                 # Python package dependencies
 └── README.md                        # This file
 ```
@@ -113,9 +110,6 @@ phospho_root/
 | Script | Purpose | Input | Output |
 |--------|---------|-------|--------|
 | `convert_to_parquet.py` | Convert Excel to Parquet | `.xls/.xlsb` | `.parquet` |
-| `enhanced_clean_data.py` | Clean and process data | Raw parquet | Cleaned parquet |
-| `fetch_sequences.py` | Fetch protein sequences | Cleaned data | Data with sequences |
-| `merge_command.py` | Merge datasets | Multiple parquet | Combined dataset |
 | `gen_test_data.py` | Generate test data | Full dataset | Sample dataset |
 | `search_data.py` | Search UniProt IDs | Dataset + ID | Search results |
 
@@ -131,9 +125,16 @@ result = search_uniprot_id("data/raw/rat/14rat_data.xls", target_id)
 ### Generate test dataset
 ```python
 # In scripts/gen_test_data.py
-df = pd.read_excel("../data/raw/rat/14rat_data.xls")
+df = pd.read_excel("data/raw/rat/14rat_data.xls")
 sample = df.sample(n=20, random_state=42)
-sample.to_csv("../data/processed/rat/test_data.csv", index=False)
+sample.to_csv("data/processed/rat/test_data.csv", index=False)
+```
+
+### Convert Excel to Parquet
+```python
+# In scripts/convert_to_parquet.py
+convert_excel_to_parquet("data/raw/mouse/Phosphomouse_phosphorylation_sites.xlsb", 
+                        "data/processed/mouse/Phosphomouse_phosphorylation_sites.parquet")
 ```
 
 ## Dependencies
