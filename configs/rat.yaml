@@ -12,7 +12,31 @@ columns_to_keep:
   amino_acid: "Amino Acid"
   sequence_window: "Sequence Window"
   modified_sequence: "Modified Sequence"
+  position_in_mod_seq: "Position in peptide"
+  all_brain: "Total Brain #"
+  cortex: "Cortex #"
+  brainstem: "Brainstem #"
+  cerebellum: "Cerebellum #"
+  testicle: "Testicle #"
+  pancreas: "Pancreas #"
+  stomach: "Stomach #"
+  liver: "Liver #"
+  fat: "Fat #"
+  intestine: "Intestine #"
+  kidney: "Kidney #"
+  spleen: "Spleen #"
+  thymus: "Thymus #"
+  lung: "Lung #"
+  muscle: "Muscle #"
+  heart: "Heart #"
+  blood: "Blood #"
+  total_ms_sum: "TOTAL MS SUM.1"
+
   
-# Data processing settings
+# Data cleaning filters:
+filters:
+  localization_min: 0.75
+
+# Test Data settings:
 sample_size: 20
 random_state: 42

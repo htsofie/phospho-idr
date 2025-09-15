@@ -113,8 +113,17 @@ print(f"Percentage of missing values: {missing_count / len(df) * 100:.2f}%")
 
 df = pd.read_excel(config["raw_data"])
 col = "Localization Prob"
-print("Min:", df[col].min())
-print("Max:", df[col].max())
+min_val = df[col].min()
+max_val = df[col].max()
+print("Minimum:", min_val)
+print("Maximum:", max_val)
 # Min is 0.745606 and Max is 1.0
-# No need to remove any since most are decently well localized >0.745
+# Some scores are less than 0.75 so should be removed
+# To determine number of scores less than 0.75
+num_rows = (df[col] < 0.75).sum()
+print("Number of rows with localization_prob < 0.75:", num_rows)
+# %% [markdown]
+# To look at the values of these 11 rows w localization prob less than 0.75:
+df.loc[df[col] < 0.75, col]
 
+# %%

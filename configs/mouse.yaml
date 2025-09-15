@@ -1,0 +1,6 @@
+# Raw data location
+raw_data: ../data/raw/mouse/Phosphomouse_phosphorylation_sites.xlsb
+
+# Columns to keep from raw data
+columns_to_keep:
+  

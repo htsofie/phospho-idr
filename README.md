@@ -11,7 +11,7 @@ A comprehensive data analysis project for processing and analyzing phosphorylati
 ### Installation
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/htsofie/phospho-idr
 cd phospho_root
 
 # Create and activate virtual environment
