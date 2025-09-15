@@ -1,4 +1,4 @@
-#!/home/htsofie/Desktop/phospho_root/lab_env/bin/python
+#!/Users/sofie/Desktop/gsponer-lab-work/phospho_root/lab_env/bin/python3.13
 # -*- coding: utf-8 -*-
 import re
 import sys
