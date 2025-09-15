@@ -28,7 +28,13 @@ pip install -r requirements.txt
 source lab_env/bin/activate
 
 ```
-
+### To Push/Pull Changes to/from GitHub
+```bash
+git status #checks status of what is new
+git add . #adds all modified files
+git commit -m "Add message here on new changes"
+git push origin master # use master not main unless i want to rename branch
+```
 ##  Project Structure
 
 ```
