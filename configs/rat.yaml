@@ -1,18 +1,18 @@
 # Rat data configuration file
 
 # Raw data location
-raw_data: ../data/raw/rat/14rat_data.xls
+raw_data: data/raw/rat/14rat_data.xls
 
 # Columns to keep from raw data
 columns_to_keep:
-  uniprot_id: Uniprot
-  ensembl_id: ENSEMBL
-  position: Position
-  localization_prob: "Localization Prob"
+  uniprot_id: "Uniprot"
+  ensembl_id: "ENSEMBL"
+  position: "Position"
   amino_acid: "Amino Acid"
-  sequence_window: "Sequence Window"
-  modified_sequence: "Modified Sequence"
+  sequence_window: "Sequence Window" # sequence windows of ±6 residues adjacent to all serine and threonine phosphorylation sites
+  modified_sequence: "Modified Sequence" # modifications of oxidation (M) (M(ox)), acetylation (protein N-term), Gln->pyro-Glu, and phosphorylation (STY).
   position_in_mod_seq: "Position in peptide"
+  total_tissue_num: "TOTAL MS SUM.1" 
   all_brain: "Total Brain #"
   cortex: "Cortex #"
   brainstem: "Brainstem #"
@@ -30,13 +30,12 @@ columns_to_keep:
   muscle: "Muscle #"
   heart: "Heart #"
   blood: "Blood #"
-  total_ms_sum: "TOTAL MS SUM.1"
-
+  localization: "Localization Prob" # a probability from 0-1, filter out all less than 0.75
   
 # Data cleaning filters:
 filters:
-  localization_min: 0.75
-
-# Test Data settings:
-sample_size: 20
-random_state: 42
+  localization:
+    type: numerical
+    column: "localization"
+    threshold: 0.75
+  required_ids: ["uniprot_id", "ensembl_id"] 

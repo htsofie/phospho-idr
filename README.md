@@ -30,10 +30,14 @@ source lab_env/bin/activate
 ```
 ### To Push/Pull Changes to/from GitHub
 ```bash
+# To push changes
 git status #checks status of what is new
 git add . #adds all modified files
 git commit -m "Add message here on new changes"
 git push origin master # use master not main unless i want to rename branch
+
+# To pull updates
+cd /home/htsofie/Desktop/phospho_root && git fetch --all --prune | cat && git pull --rebase --autostash | cat
 ```
 ##  Project Structure
 

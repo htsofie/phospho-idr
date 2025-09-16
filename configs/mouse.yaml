@@ -1,6 +1,26 @@
 # Raw data location
-raw_data: ../data/raw/mouse/Phosphomouse_phosphorylation_sites.xlsb
+raw_data: data/raw/mouse/Phosphomouse_phosphorylation_sites.xlsb
 
 # Columns to keep from raw data
 columns_to_keep:
-  
+  protein_IDs: "Protein IPI (Assigned by Sequest)"
+  position: "Site" 
+  amino_acid: "Residue"
+  modified_sequence: "Sequence"
+  total_tissue_num: "#tissues"
+  brain: "Brain"
+  brownfat: "BrownFat"
+  heart: "Heart"
+  kidney: "Kidney"
+  liver: "Liver"
+  lung: "Lung"
+  pancreas: "Pancreas"
+  spleen: "Spleen"
+  testis: "Testis"
+  localization: "Localized" #either 'localized' or 'Amb' for ambigous, filter out all ambigous
+
+filters:
+  localization:
+    type: categorical
+    column: "localization"
+    exclude: ["Amb"]
