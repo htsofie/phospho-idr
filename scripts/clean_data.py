@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
 import yaml
 
-# To run in command line: python scripts/clean_data.py --config configs/rat.yaml --mode sample --output-format csv
-# specify: --mode sample or --mode full, --output-format csv or --output-format parquet
+# python scripts/clean_data.py --input data/processed/mouse/test_data.csv --output data/processed/mouse/cleaned_test_data.csv --species mouse
+# # Original config-based approach
+# python scripts/clean_data.py --config configs/mouse.yaml --mode sample --output-format csv
+# python scripts/clean_data.py --config configs/rat.yaml --mode full --output-format parquet
+
 
 def load_config(config_path: str) -> Dict:
     with open(config_path, 'r') as file:
@@ -136,6 +140,98 @@ def apply_mouse_categorical_filters(df: pd.DataFrame, config: Dict) -> pd.DataFr
     return df.loc[~df[column_name].isin(exclude_values)].copy()
 
 
+# -------------------- Modified sequence processing --------------------
+
+def clean_sequence_motif(motif_seq: str, species: str) -> Tuple[str, Optional[int]]:
+    """
+    Clean sequence motif and extract phosphorylation site position.
+    
+    Args:
+        motif_seq: Raw sequence motif string
+        species: 'rat' or 'mouse' to determine cleaning rules
+        
+    Returns:
+        Tuple of (cleaned_motif, motif_position)
+        motif_position is 1-based index of phosphorylation site in cleaned motif
+    """
+    if pd.isna(motif_seq) or not motif_seq:
+        return "", None
+    
+    seq = str(motif_seq).strip()
+    
+    if species == 'rat':
+        # For rat data: phosphorylation site is always at position 7
+        # Remove underscores and adjust position if underscores were before position 7
+        
+        # Count underscores before position 7 (0-based index 6)
+        underscores_before_7 = seq[:6].count('_')
+        
+        # Remove all underscores
+        seq = seq.replace('_', '')
+        
+        # Calculate new position: 7 - number of underscores removed before position 7
+        motif_pos = 7 - underscores_before_7
+        
+    elif species == 'mouse':
+        # For mouse data: phosphorylation site indicated by * at position 7
+        # Remove * and underscores, adjust position if underscores were before position 7
+        
+        # Count underscores before position 7 (0-based index 6)
+        underscores_before_7 = seq[:6].count('_')
+        
+        # Remove * and underscores
+        seq = seq.replace('*', '')
+        seq = seq.replace('_', '')
+        
+        # Calculate new position: 7 - number of underscores removed before position 7
+        motif_pos = 7 - underscores_before_7
+    
+    else:
+        # Generic cleaning for unknown species
+        underscores_before_7 = seq[:6].count('_')
+        
+        # Remove * and underscores
+        seq = seq.replace('*', '')
+        seq = seq.replace('_', '')
+        
+        # Calculate new position: 7 - number of underscores removed before position 7
+        motif_pos = 7 - underscores_before_7
+    
+    return seq, motif_pos
+
+
+def process_sequence_motifs(df: pd.DataFrame, species: str) -> pd.DataFrame:
+    """Process sequence motifs for both rat and mouse data."""
+    if 'site_motif' not in df.columns:
+        print(f"Warning: 'site_motif' column not found in dataset. Available columns: {list(df.columns)}")
+        return df
+    
+    # Apply cleaning to each row
+    results = df['site_motif'].apply(lambda x: clean_sequence_motif(x, species))
+    
+    # Split results into separate columns
+    cleaned_motifs, motif_positions = zip(*results)
+    
+    # Add new columns
+    df = df.copy()
+    df['cleaned_site_motif'] = cleaned_motifs
+    df['motif_position'] = motif_positions
+    
+    # Reorder columns to put cleaned_site_motif right after site_motif
+    cols = list(df.columns)
+    motif_idx = cols.index('site_motif')
+    
+    # Remove the new columns from their current positions
+    cols.remove('cleaned_site_motif')
+    cols.remove('motif_position')
+    
+    # Insert them right after site_motif
+    cols.insert(motif_idx + 1, 'cleaned_site_motif')
+    cols.insert(motif_idx + 2, 'motif_position')
+    
+    return df[cols]
+
+
 # -------------------- Standardization --------------------
 
 def standardize_id_columns(df: pd.DataFrame, species: str, config: Dict) -> pd.DataFrame:
@@ -184,40 +280,85 @@ def write_output(df: pd.DataFrame, species: str, mode: str, output_format: str) 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='Clean and filter processed phosphorylation datasets')
-    parser.add_argument('--config', '-c', required=True, help='Path to species YAML configuration file')
+    
+    # Input options - either config-based or direct file paths
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('--config', '-c', help='Path to species YAML configuration file')
+    input_group.add_argument('--input', '-i', help='Path to input CSV file')
+    
+    # Output options
+    parser.add_argument('--output', '-o', help='Path to output CSV file (required when using --input)')
+    parser.add_argument('--species', '-s', choices=['mouse', 'rat'], help='Species name (required when using --input)')
+    
+    # Legacy options for config-based processing
     parser.add_argument('--mode', '-m', choices=['sample', 'full'], default='sample', help='Input mode: sample (CSV) or full (Parquet)')
     parser.add_argument('--output-format', '-f', choices=['csv', 'parquet'], default='parquet', help='Output file format')
+    
     args = parser.parse_args()
 
-    config = load_config(args.config)
-    species = detect_species(config, args.config)
+    # Determine processing mode
+    if args.config:
+        # Config-based processing (legacy mode)
+        config = load_config(args.config)
+        species = detect_species(config, args.config)
+        input_path, _ = get_processed_paths(species, args.mode)
+        output_path = None  # Will be determined by write_output
+    else:
+        # Direct file processing
+        if not args.input or not args.output or not args.species:
+            parser.error("When using --input, --output and --species are required")
+        
+        species = args.species
+        input_path = args.input
+        output_path = args.output
+        
+        # Load default config for the species
+        config_path = f'configs/{species}.yaml'
+        if not os.path.exists(config_path):
+            parser.error(f"Config file not found: {config_path}")
+        config = load_config(config_path)
 
-    input_path, alt_path = get_processed_paths(species, args.mode)
+    # Check if input file exists
     if not os.path.exists(input_path):
-        msg = f'Input not found: {input_path}'
-        if alt_path is not None:
-            msg += f' and {alt_path}'
-        raise FileNotFoundError(msg)
+        print(f'Input file not found: {input_path}')
+        return 1
 
-    df = read_processed(input_path)
+    # Read the input file
+    if input_path.endswith('.parquet'):
+        df = pd.read_parquet(input_path)
+    elif input_path.endswith('.csv'):
+        df = pd.read_csv(input_path)
+    else:
+        print(f'Unsupported file format: {input_path}')
+        return 1
 
     # Species-specific processing
     if species == 'rat':
         df = apply_localization_threshold(df, config)
         df = filter_ids_rat(df, config)
         df = standardize_id_columns(df, species, config)
+        df = process_sequence_motifs(df, species)
     elif species == 'mouse':
         df = apply_mouse_categorical_filters(df, config)
         df = extract_ids_mouse(df, config)
         df = standardize_id_columns(df, species, config)
+        df = process_sequence_motifs(df, species)
     else:
         # If unknown species, attempt generic filters if present
         df = apply_mouse_categorical_filters(df, config)
         df = apply_localization_threshold(df, config)
         df = filter_ids_rat(df, config)
         df = standardize_id_columns(df, species, config)
+        df = process_sequence_motifs(df, species)
 
-    saved_to = write_output(df, species, args.mode, args.output_format)
+    # Save output
+    if output_path:
+        # Direct output path specified
+        saved_to = output_path
+        df.to_csv(output_path, index=False)
+    else:
+        # Use legacy write_output function
+        saved_to = write_output(df, species, args.mode, args.output_format)
 
     # Brief report
     print(f'species: {species}')

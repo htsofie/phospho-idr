@@ -6,6 +6,7 @@ columns_to_keep:
   protein_IDs: "Protein IPI (Assigned by Sequest)"
   position: "Site" 
   amino_acid: "Residue"
+  site_motif: "motif peptide"
   modified_sequence: "Sequence"
   total_tissue_num: "#tissues"
   brain: "Brain"

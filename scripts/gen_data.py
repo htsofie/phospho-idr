@@ -13,8 +13,8 @@ def load_config(config_path):
 
 def main():
    # Creates command line argument parser, supporting sample or full processing and output format
-   # Examples:
-   #   Sample: python scripts/gen_data.py --config configs/rat.yaml --mode sample --sample-size 30 --random-state 42 --output-format csv
+   # Examples:python scripts/gen_data.py --config configs/rat.yaml --mode sample --sample-size 30 --random-state 42 --output-format csv
+   #   Sample: 
    #   Full:   python scripts/gen_data.py --config configs/rat.yaml --mode full --output-format parquet
     parser = argparse.ArgumentParser(description='Generate datasets from phosphorylation data')
     parser.add_argument('--config', '-c', required=True, help='Path to configuration YAML file')

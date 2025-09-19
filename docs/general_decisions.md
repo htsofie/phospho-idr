@@ -33,3 +33,15 @@ To remove these later will add a filter to config for localizaiton prob < 0.75
 
     It would look something like this:
     swiss-prot/uniprot/ensembl id -> uniprot id -> most recent full sequence -> search for area that matches sequence window -> if multiple return the one closest to the position of phosphorylation documented in the datasets -> if none match return any that have only 1-4 AAs different -> if still none match then return which lines don't match or save in new data set. -> extract full sequence from best match -> add full sequence to data and edit position of phosphorylation in sequence to be the correct one. 
+
+### Sept 16th 2025
+    After mapping IDs to uniprot with to confirm/retrieve corresponding uniprot id to make sure it still exists, some proteins have been removed due to redundancy/have been invalidated, I extract full sequence with that uniprot id for either isoform - if specified - or canonical sequence. 
+
+    To confirm this is done correctly I ran the script on my sample data csvs and am manually confirming in the uniprot database that the id matches the correct protein. I am cross referencing this with the protein name/description in the raw data set. 
+
+    Then I will align the phosphorylation sequence window with the full protein sequence.
+
+### Sept 17th 2025
+    Looking at alignment of sequence window to full protein, I see a couple proteins where the alignment is very far off from the expected position of the phosphorylation. Some of them, the proteins identified, even have an expected position that is larger than the uniprot id mapped protein itself. I compared this to the IDs of the proteins in the raw data set and it is consistent. In uniprot showing a protein length of 123 AA or 198 but the phosphorylation position is 1293 or something which can't be possible.
+
+    In get_full_seq.py I am flagging any rows where the sequence length number is smaller than the position number of the phosphorylation. These rows, depending on how many proteins there are, I can redirect to a different ID and sequence to align to. 

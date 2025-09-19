@@ -9,7 +9,7 @@ columns_to_keep:
   ensembl_id: "ENSEMBL"
   position: "Position"
   amino_acid: "Amino Acid"
-  sequence_window: "Sequence Window" # sequence windows of ±6 residues adjacent to all serine and threonine phosphorylation sites
+  site_motif: "Sequence Window" # sequence windows of ±6 residues adjacent to all serine and threonine phosphorylation sites
   modified_sequence: "Modified Sequence" # modifications of oxidation (M) (M(ox)), acetylation (protein N-term), Gln->pyro-Glu, and phosphorylation (STY).
   position_in_mod_seq: "Position in peptide"
   total_tissue_num: "TOTAL MS SUM.1" 

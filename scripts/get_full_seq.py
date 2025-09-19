@@ -77,6 +77,7 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
     df['sequence_type'] = None
     df['sequence_fetch_success'] = False
     df['sequence_fetch_error'] = None
+    df['sequence_length_warning'] = None
     
     # Process each row
     for idx, row in df.iterrows():
@@ -88,11 +89,26 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
         
         if sequence_data:
             full_sequence, sequence_type = sequence_data
+            sequence_length = len(full_sequence)
             df.at[idx, 'full_sequence'] = full_sequence
-            df.at[idx, 'sequence_length'] = len(full_sequence)
+            df.at[idx, 'sequence_length'] = sequence_length
             df.at[idx, 'sequence_type'] = sequence_type
             df.at[idx, 'sequence_fetch_success'] = True
-            print(f"  ✓ Success: {sequence_type}, {len(full_sequence)} amino acids")
+            
+            # Check if sequence length is smaller than phosphorylation position
+            warning_message = None
+            if not pd.isna(row.get('position')) and row.get('position'):
+                try:
+                    phospho_position = int(row['position'])
+                    if sequence_length < phospho_position:
+                        warning_message = f"Sequence length ({sequence_length}) < phosphorylation position ({phospho_position})"
+                        df.at[idx, 'sequence_length_warning'] = warning_message
+                        print(f"  ⚠ WARNING: {warning_message}")
+                except (ValueError, TypeError):
+                    pass
+            
+            if not warning_message:
+                print(f"  ✓ Success: {sequence_type}, {sequence_length} amino acids")
         else:
             df.at[idx, 'sequence_fetch_success'] = False
             df.at[idx, 'sequence_fetch_error'] = 'Could not fetch sequence from UniProt'
@@ -103,7 +119,7 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
     
     # Reorder columns to put sequence data after mapping results
     mapping_cols = ['uniprot_mapped_id', 'mapping_source', 'mapping_success']
-    sequence_cols = ['full_sequence', 'sequence_length', 'sequence_type', 'sequence_fetch_success', 'sequence_fetch_error']
+    sequence_cols = ['full_sequence', 'sequence_length', 'sequence_type', 'sequence_fetch_success', 'sequence_fetch_error', 'sequence_length_warning']
     other_cols = [col for col in df.columns if col not in mapping_cols + sequence_cols]
     df_reordered = df[mapping_cols + sequence_cols + other_cols]
     
@@ -118,6 +134,15 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
     print(f"  Successful sequence fetches: {successful_fetches}")
     print(f"  Failed sequence fetches: {len(df) - successful_fetches}")
     print(f"  Success rate: {successful_fetches/len(df)*100:.1f}%")
+    
+    # Print warning statistics
+    warnings_count = df['sequence_length_warning'].notna().sum()
+    if warnings_count > 0:
+        print(f"\nSequence length warnings: {warnings_count}")
+        print("  These rows have sequence length < phosphorylation position (potential mapping issues)")
+        warning_rows = df[df['sequence_length_warning'].notna()]
+        for idx, row in warning_rows.iterrows():
+            print(f"    Row {idx + 1}: {row['uniprot_mapped_id']} - {row['sequence_length_warning']}")
     
     # Print error breakdown
     if len(df) - successful_fetches > 0:

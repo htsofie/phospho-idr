@@ -1,4 +1,4 @@
-uniprot_id,ensembl_id,position,amino_acid,sequence_window,modified_sequence,position_in_mod_seq,total_tissue_num,all_brain,cortex,brainstem,cerebellum,testicle,pancreas,stomach,liver,fat,intestine,kidney,spleen,thymus,lung,muscle,heart,blood,localization
+uniprot_id,ensembl_id,position,amino_acid,site_motif,modified_sequence,position_in_mod_seq,total_tissue_num,all_brain,cortex,brainstem,cerebellum,testicle,pancreas,stomach,liver,fat,intestine,kidney,spleen,thymus,lung,muscle,heart,blood,localization
 Q68FH0-1;Q68FH0;A2AS46;Q68FH0-2;A2AS45;Q05D18;Q3UIX3;Q68FH0-3;A2AS47,ENSMUSG00000026991;ENSMUSG00000026991;ENSMUSG00000026991,1135.0,S,YRLYLQSPRSYED,_LYLQS(ph)PR_,5,1,1.0,1.0,1.0,1.0,,,,,,,,,,,,,,1.0
 ,,273.0,S,WQERVLSPILPNN,_VLS(ph)PILPNNILSTTAK_,3,1,,,,,,,,,,,,,1.0,,,,,1.0
 P70600-1;P70600;P70600-3,ENSRNOG00000027839;ENSRNOG00000027839,375.0,S,DGEKRNSLPQIPT,_RNS(ph)LPQIPTLNLESR_,3,11,1.0,1.0,1.0,1.0,,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,,,1.0,1.0
