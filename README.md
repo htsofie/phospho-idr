@@ -38,6 +38,8 @@ git push origin master # use master not main unless i want to rename branch
 
 # To pull updates
 cd /home/htsofie/Desktop/phospho_root && git fetch --all --prune | cat && git pull --rebase --autostash | cat
+# OR better..
+cd git pull origin master
 ```
 ##  Project Structure
 
