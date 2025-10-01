@@ -127,3 +127,23 @@ print("Number of rows with localization_prob < 0.75:", num_rows)
 df.loc[df[col] < 0.75, col]
 
 # %%
+# Count rows missing BOTH UniProt AND ENSEMBL values
+df = pd.read_excel("../data/raw/rat/14rat_data.xls")
+missing_both = df[['Uniprot', 'ENSEMBL']].isna().all(axis=1).sum()
+total_rows = len(df)
+
+print(f"Rows missing BOTH UniProt AND ENSEMBL: {missing_both}")
+print(f"Total rows: {total_rows}")
+print(f"Percentage missing both: {missing_both / total_rows * 100:.2f}%")
+
+# %%
+# Count unique phosphoproteins in the Protein column
+df = pd.read_excel("../data/raw/rat/14rat_data.xls")
+unique_proteins = df['Protein'].nunique()
+total_rows = len(df)
+
+print(f"Number of unique phosphoproteins: {unique_proteins}")
+print(f"Total phosphorylation sites: {total_rows}")
+print(f"Average sites per protein: {total_rows / unique_proteins:.2f}")
+
+# %%
