@@ -19,7 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description='Generate datasets from phosphorylation data')
     parser.add_argument('--config', '-c', required=True, help='Path to configuration YAML file')
     parser.add_argument('--mode', '-m', choices=['sample', 'full'], default='sample', help='Process a random sample or the full dataset')
-    parser.add_argument('--sample-size', '-n', type=int, default=30, help='Number of samples to generate (when mode=sample)')
+    parser.add_argument('--sample-size', '-n', type=int, default=30, help='Number of proteins to sample (when mode=sample)')
     parser.add_argument('--random-state', '-r', type=int, default=42, help='Random state for reproducibility (when mode=sample)')
     parser.add_argument('--output-format', '-f', choices=['csv', 'parquet'], default='csv', help='Output file format')
     
@@ -34,10 +34,53 @@ def main():
         df = pd.read_excel(raw_data_path, engine='pyxlsb')
     else:
         df = pd.read_excel(raw_data_path)
+
+    # Infer species from raw data path (parent directory name)
+    species_or_group = os.path.basename(os.path.dirname(raw_data_path))
+
+    # Helper to extract IPI for grouping and output column 'Protein'
+    def extract_mouse_ipi(cell: object) -> str:
+        # Expected like: "IPI:IPI00121135.5|SWISS-PROT:Q62093|TREMBL:A2AA29;Q99MY4;Q99MY5|ENSEMBL:ENSMUSP..."
+        if pd.isna(cell):
+            return None
+        try:
+            parts = str(cell).split('|')
+        except Exception:
+            parts = [str(cell)]
+        for part in parts:
+            p = str(part).strip()
+            if p.startswith('IPI:'):
+                val = p.split(':', 1)[1].strip()
+                return val or None
+        return None
+
+    # Build a grouping/protein column before sampling
+    group_col = '_protein_group'
+    if species_or_group == 'mouse':
+        source_col = 'Protein IPI (Assigned by Sequest)'
+        if source_col in df.columns:
+            df[group_col] = df[source_col].apply(extract_mouse_ipi)
+        else:
+            df[group_col] = None
+    elif species_or_group == 'rat':
+        # Rat dataset is expected to have a 'Protein' column containing IPI
+        df[group_col] = df['Protein'] if 'Protein' in df.columns else None
+    else:
+        df[group_col] = None
     
     # Determine input frame depending on mode
     if args.mode == 'sample':
-        df_input = df.sample(n=args.sample_size, random_state=args.random_state)
+        # Sample by protein groups: choose random proteins, include all rows for those proteins
+        if group_col in df.columns and df[group_col].notna().any():
+            unique_proteins = (
+                pd.Series(df[group_col].dropna().unique())
+                .sample(n=min(args.sample_size, df[group_col].dropna().nunique()), random_state=args.random_state)
+                .tolist()
+            )
+            df_input = df[df[group_col].isin(unique_proteins)].copy()
+        else:
+            # Fallback to row sampling if grouping info is unavailable
+            df_input = df.sample(n=min(args.sample_size, len(df)), random_state=args.random_state)
         output_basename = 'test_data'
     else:
         df_input = df
@@ -57,9 +100,36 @@ def main():
     # Create reverse mapping: original_name -> standardized_name
     reverse_mapping = {v: k for k, v in columns_mapping.items() if v in df_input.columns}
     df_filtered = df_filtered.rename(columns=reverse_mapping)
+
+    # Ensure 'Protein' column is present in output
+    # - For mouse, derive from standardized 'protein_IDs' (if present) or precomputed group_col
+    # - For rat, prefer existing 'Protein' from raw; otherwise use group_col if available
+    if 'Protein' not in df_filtered.columns:
+        protein_values = None
+        if species_or_group == 'mouse':
+            if 'protein_IDs' in df_filtered.columns:
+                protein_values = df_filtered['protein_IDs'].apply(extract_mouse_ipi)
+            elif group_col in df_input.columns:
+                protein_values = df_input.loc[df_filtered.index, group_col]
+        elif species_or_group == 'rat':
+            if 'Protein' in df_input.columns:
+                protein_values = df_input.loc[df_filtered.index, 'Protein']
+            elif group_col in df_input.columns:
+                protein_values = df_input.loc[df_filtered.index, group_col]
+        if protein_values is None:
+            protein_values = pd.Series([None] * len(df_filtered), index=df_filtered.index)
+        df_filtered['Protein'] = protein_values
     
+    # Move 'Protein' to be the first column and 'protein_description' second if present
+    if 'Protein' in df_filtered.columns:
+        # Determine desired order
+        ordered_cols = ['Protein']
+        if 'protein_description' in df_filtered.columns:
+            ordered_cols.append('protein_description')
+        other_cols = [c for c in df_filtered.columns if c not in ordered_cols]
+        df_filtered = df_filtered[ordered_cols + other_cols]
+
     # Build output path and write
-    species_or_group = os.path.basename(os.path.dirname(raw_data_path))
     output_dir = os.path.join('data', 'processed', species_or_group)
     os.makedirs(output_dir, exist_ok=True)
     

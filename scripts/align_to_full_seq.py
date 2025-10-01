@@ -62,9 +62,7 @@ def _get_aligned_sequence_info(aln_prot: str, aln_pep: str) -> Dict[str, Any]:
     return {
         "aligned_protein_sequence": prot_aligned,
         "aligned_peptide_sequence": pep_aligned,
-        "matching_residues": matches,
-        "mismatching_residues": mismatches,
-        "total_aligned_residues": matches + mismatches
+        "mismatching_residues": mismatches
     }
 
 
@@ -85,14 +83,11 @@ def _exact_match_candidates(protein_seq: str, peptide_seq: str, phospho_pos_in_p
             "start": idx,
             "end": idx + len(peptide_seq),
             "aligned_position": protein_pos,
-            "score": float(len(peptide_seq)) * 2.0,
             "identity": 100.0,
             "phosphosite_conserved": True,
             "aligned_protein_sequence": peptide_seq,
             "aligned_peptide_sequence": peptide_seq,
-            "matching_residues": len(peptide_seq),
-            "mismatching_residues": 0,
-            "total_aligned_residues": len(peptide_seq)
+            "mismatching_residues": 0
         })
         start = idx + 1
     return candidates
@@ -134,7 +129,6 @@ def _local_alignment_candidates(seq_region: str, region_offset: int, peptide_seq
                 "start": region_offset + start,
                 "end": region_offset + end,
                 "aligned_position": phospho_pos,
-                "score": float(score),
                 "identity": identity,
                 "phosphosite_conserved": True,
                 **alignment_info
@@ -170,12 +164,12 @@ def map_peptide_to_protein(protein_seq: str, peptide_seq: str, phospho_pos_in_pe
     if not candidates:
         return {"match_type": "failed", "error": "No alignment found"}
 
-    # Sort by priority: exact > score > proximity to expected position
+    # Sort by priority: exact > identity > proximity to expected position
     def sort_key(c: Dict[str, Any]) -> Tuple[int, float, float]:
         is_exact = 1 if c["match_type"] == "exact" else 0
-        score = c.get("score", 0.0)
+        identity = c.get("identity", 0.0)
         proximity = -abs(expected_position - c["aligned_position"]) if expected_position and c.get("aligned_position") else 0.0
-        return (is_exact, score, proximity)
+        return (is_exact, identity, proximity)
 
     candidates.sort(key=sort_key, reverse=True)
     return candidates[0]
@@ -183,10 +177,7 @@ def map_peptide_to_protein(protein_seq: str, peptide_seq: str, phospho_pos_in_pe
 
 def process_alignment_row(row: pd.Series) -> Dict[str, Any]:
     """Process a single row for alignment."""
-    # Check required data
-    if not row.get('sequence_fetch_success', False):
-        return {"alignment_success": False, "alignment_error": "No full sequence available"}
-    
+    # Check required data - updated to work with grouped pipeline output
     if pd.isna(row.get('full_sequence')) or not row.get('full_sequence'):
         return {"alignment_success": False, "alignment_error": "Empty full sequence"}
     
@@ -198,8 +189,21 @@ def process_alignment_row(row: pd.Series) -> Dict[str, Any]:
     
     # Get data
     protein_seq = str(row['full_sequence']).strip()
-    peptide_seq = str(row['cleaned_site_motif']).strip()
-    phospho_pos_in_peptide = int(row['motif_position'])
+    
+    # Handle semicolon-separated cleaned site motifs (take the first one)
+    motif_str = str(row['cleaned_site_motif']).strip()
+    if ';' in motif_str:
+        peptide_seq = motif_str.split(';')[0].strip()
+    else:
+        peptide_seq = motif_str
+    
+    # Handle semicolon-separated motif positions (take the first one)
+    motif_pos_str = str(row['motif_position']).strip()
+    if ';' in motif_pos_str:
+        phospho_pos_in_peptide = int(motif_pos_str.split(';')[0].strip())
+    else:
+        phospho_pos_in_peptide = int(motif_pos_str)
+    
     expected_position = int(row['position']) if not pd.isna(row.get('position')) and row.get('position') else None
     
     # Perform alignment
@@ -207,6 +211,11 @@ def process_alignment_row(row: pd.Series) -> Dict[str, Any]:
     
     if alignment_result["match_type"] == "failed":
         return {"alignment_success": False, "alignment_error": alignment_result.get("error", "Unknown error")}
+    
+    # Check minimum identity threshold (70%)
+    identity = alignment_result.get("identity", 0)
+    if identity < 70.0:
+        return {"alignment_success": False, "alignment_error": f"Identity too low: {identity:.1f}% (minimum 70%)"}
     
     # Success - return all alignment data
     result = {"alignment_success": True}
@@ -225,8 +234,8 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
     df = pd.read_csv(input_path)
     print(f"Loaded {len(df)} rows")
     
-    # Check required columns
-    required_cols = ['full_sequence', 'cleaned_site_motif', 'motif_position', 'sequence_fetch_success']
+    # Check required columns - updated for grouped pipeline output
+    required_cols = ['full_sequence', 'cleaned_site_motif', 'motif_position']
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         print(f"Error: Missing required columns: {missing_cols}")
@@ -236,26 +245,33 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
     alignment_columns = [
         'alignment_success', 'match_type', 'aligned_position', 'position_difference', 'identity', 
         'alignment_error', 'phosphosite_conserved', 'aligned_protein_sequence', 'aligned_peptide_sequence',
-        'matching_residues', 'mismatching_residues', 'total_aligned_residues'
+        'mismatching_residues'
     ]
     for col in alignment_columns:
         df[col] = None
     
     print(f"Starting motif alignment for {species} data...")
     
-    # Process each row
-    for idx, row in df.iterrows():
-        if idx % 100 == 0:
-            print(f"Processing row {idx + 1}/{len(df)}")
+    # Filter to only rows with full sequences
+    rows_with_sequence = df[df['full_sequence'].notna() & (df['full_sequence'] != '')]
+    print(f"Found {len(rows_with_sequence)} rows with full sequences to align")
+    
+    # Process each row with full sequence
+    for idx, row in rows_with_sequence.iterrows():
+        print(f"Processing row {idx + 1} (Protein: {row.get('Protein', 'N/A')})")
         
         alignment_result = process_alignment_row(row)
         for key, value in alignment_result.items():
             df.at[idx, key] = value
+        
+        if alignment_result.get('alignment_success', False):
+            print(f"  ✓ Alignment successful: position {alignment_result.get('aligned_position', 'N/A')}")
+        else:
+            print(f"  ✗ Alignment failed: {alignment_result.get('alignment_error', 'Unknown error')}")
     
-    # Reorder columns
-    sequence_cols = ['full_sequence', 'sequence_length', 'sequence_type', 'sequence_fetch_success']
-    other_cols = [col for col in df.columns if col not in sequence_cols + alignment_columns]
-    df_reordered = df[sequence_cols + alignment_columns + other_cols]
+    # Reorder columns - put alignment columns at the end
+    other_cols = [col for col in df.columns if col not in alignment_columns]
+    df_reordered = df[other_cols + alignment_columns]
     
     # Save results
     print(f"\nSaving results to: {output_path}")
@@ -269,18 +285,21 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
     print(f"  Failed: {len(df) - successful}")
     
     if successful > 0:
+        # Filter for successful alignments (handle NaN values)
+        successful_mask = df['alignment_success'] == True
+        
         # Match types
-        match_counts = df[df['alignment_success']]['match_type'].value_counts()
+        match_counts = df[successful_mask]['match_type'].value_counts()
         print(f"\nMatch types:")
         for match_type, count in match_counts.items():
             print(f"  {match_type}: {count} ({count/successful*100:.1f}%)")
         
         # Phosphosite conservation
-        conserved = df[df['alignment_success']]['phosphosite_conserved'].sum()
+        conserved = df[successful_mask]['phosphosite_conserved'].sum()
         print(f"\nPhosphosite conservation: {conserved} ({conserved/successful*100:.1f}%)")
         
         # Position differences
-        valid_diffs = df[df['alignment_success'] & df['position_difference'].notna()]['position_difference']
+        valid_diffs = df[successful_mask & df['position_difference'].notna()]['position_difference']
         if len(valid_diffs) > 0:
             print(f"\nPosition differences:")
             print(f"  Mean: {valid_diffs.mean():.1f}, Median: {valid_diffs.median():.1f}")

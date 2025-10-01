@@ -4,6 +4,7 @@ raw_data: data/raw/mouse/Phosphomouse_phosphorylation_sites.xlsb
 # Columns to keep from raw data
 columns_to_keep:
   protein_IDs: "Protein IPI (Assigned by Sequest)"
+  protein_description: "Protein Description"
   position: "Site" 
   amino_acid: "Residue"
   site_motif: "motif peptide"

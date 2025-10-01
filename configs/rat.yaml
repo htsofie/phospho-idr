@@ -7,6 +7,7 @@ raw_data: data/raw/rat/14rat_data.xls
 columns_to_keep:
   uniprot_id: "Uniprot"
   ensembl_id: "ENSEMBL"
+  protein_description: "Protein Descriptions"
   position: "Position"
   amino_acid: "Amino Acid"
   site_motif: "Sequence Window" # sequence windows of ±6 residues adjacent to all serine and threonine phosphorylation sites

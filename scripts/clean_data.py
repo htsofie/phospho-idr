@@ -142,66 +142,75 @@ def apply_mouse_categorical_filters(df: pd.DataFrame, config: Dict) -> pd.DataFr
 
 # -------------------- Modified sequence processing --------------------
 
-def clean_sequence_motif(motif_seq: str, species: str) -> Tuple[str, Optional[int]]:
+def clean_sequence_motif(motif_seq: str, species: str) -> Tuple[str, Optional[object]]:
     """
-    Clean sequence motif and extract phosphorylation site position.
+    Clean sequence motif(s) and extract phosphorylation site position(s).
+
+    - Supports single motifs or multiple motifs separated by ';'.
+    - Each segment is cleaned independently, then rejoined by ';'.
     
     Args:
-        motif_seq: Raw sequence motif string
+        motif_seq: Raw sequence motif string, possibly containing ';' separators
         species: 'rat' or 'mouse' to determine cleaning rules
         
     Returns:
-        Tuple of (cleaned_motif, motif_position)
-        motif_position is 1-based index of phosphorylation site in cleaned motif
+        Tuple of (cleaned_motif, motif_position_or_positions)
+        motif_position_or_positions is either an int (single motif) or a ';'-joined string of ints (multiple motifs),
+        representing the 1-based index of phosphorylation site in each cleaned motif.
     """
     if pd.isna(motif_seq) or not motif_seq:
         return "", None
-    
-    seq = str(motif_seq).strip()
-    
-    if species == 'rat':
-        # For rat data: phosphorylation site is always at position 7
-        # Remove underscores and adjust position if underscores were before position 7
-        
-        # Count underscores before position 7 (0-based index 6)
-        underscores_before_7 = seq[:6].count('_')
-        
-        # Remove all underscores
-        seq = seq.replace('_', '')
-        
-        # Calculate new position: 7 - number of underscores removed before position 7
-        motif_pos = 7 - underscores_before_7
-        
-    elif species == 'mouse':
-        # For mouse data: phosphorylation site indicated by * at position 7
-        # Remove * and underscores, adjust position if underscores were before position 7
-        
-        # Count underscores before position 7 (0-based index 6)
-        underscores_before_7 = seq[:6].count('_')
-        
-        # Remove * and underscores
-        seq = seq.replace('*', '')
-        seq = seq.replace('_', '')
-        
-        # Calculate new position: 7 - number of underscores removed before position 7
-        motif_pos = 7 - underscores_before_7
-    
-    else:
-        # Generic cleaning for unknown species
-        underscores_before_7 = seq[:6].count('_')
-        
-        # Remove * and underscores
-        seq = seq.replace('*', '')
-        seq = seq.replace('_', '')
-        
-        # Calculate new position: 7 - number of underscores removed before position 7
-        motif_pos = 7 - underscores_before_7
-    
-    return seq, motif_pos
+
+    raw = str(motif_seq).strip()
+
+    # Split on ';' to support multiple sequence windows
+    segments = [seg.strip() for seg in raw.split(';')] if ';' in raw else [raw]
+
+    cleaned_segments: list[str] = []
+    positions: list[int] = []
+
+    for seg in segments:
+        seq = seg
+        if not seq:
+            cleaned_segments.append("")
+            positions.append(None)  # placeholder to keep alignment
+            continue
+
+        if species == 'rat':
+            # Rat: site is at position 7; remove underscores and adjust for underscores before position 7
+            underscores_before_7 = seq[:6].count('_')
+            seq = seq.replace('_', '')
+            motif_pos = 7 - underscores_before_7
+        elif species == 'mouse':
+            # Mouse: '*' marks site at position 7; remove '*' and underscores, adjust for underscores before 7
+            underscores_before_7 = seq[:6].count('_')
+            seq = seq.replace('*', '')
+            seq = seq.replace('_', '')
+            motif_pos = 7 - underscores_before_7
+        else:
+            # Generic cleaning
+            underscores_before_7 = seq[:6].count('_')
+            seq = seq.replace('*', '')
+            seq = seq.replace('_', '')
+            motif_pos = 7 - underscores_before_7
+
+        cleaned_segments.append(seq)
+        positions.append(motif_pos)
+
+    if len(cleaned_segments) == 1:
+        return cleaned_segments[0], positions[0]
+    # Join multiple segments and their corresponding positions with ';'
+    cleaned_joined = ';'.join(cleaned_segments)
+    pos_joined = ';'.join(str(p) if p is not None else '' for p in positions)
+    return cleaned_joined, pos_joined
 
 
 def process_sequence_motifs(df: pd.DataFrame, species: str) -> pd.DataFrame:
-    """Process sequence motifs for both rat and mouse data."""
+    """Process sequence motifs for both rat and mouse data.
+
+    - Supports semicolon-separated multiple sequence windows per row. Each is cleaned independently
+      and rejoined with ';'. The corresponding positions are also joined by ';'.
+    """
     if 'site_motif' not in df.columns:
         print(f"Warning: 'site_motif' column not found in dataset. Available columns: {list(df.columns)}")
         return df
@@ -343,6 +352,13 @@ def main() -> int:
         df = extract_ids_mouse(df, config)
         df = standardize_id_columns(df, species, config)
         df = process_sequence_motifs(df, species)
+        # Ensure 'Protein' is first and 'protein_description' is second if present
+        if 'Protein' in df.columns:
+            ordered_cols = ['Protein']
+            if 'protein_description' in df.columns:
+                ordered_cols.append('protein_description')
+            other_cols = [c for c in df.columns if c not in ordered_cols]
+            df = df[ordered_cols + other_cols]
     else:
         # If unknown species, attempt generic filters if present
         df = apply_mouse_categorical_filters(df, config)
