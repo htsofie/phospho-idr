@@ -190,40 +190,56 @@ def process_alignment_row(row: pd.Series) -> Dict[str, Any]:
     # Get data
     protein_seq = str(row['full_sequence']).strip()
     
-    # Handle semicolon-separated cleaned site motifs (take the first one)
+    # Prepare semicolon-separated cleaned site motifs and positions: try ALL segments
     motif_str = str(row['cleaned_site_motif']).strip()
-    if ';' in motif_str:
-        peptide_seq = motif_str.split(';')[0].strip()
-    else:
-        peptide_seq = motif_str
+    pos_str = str(row['motif_position']).strip()
+    peptide_segments = [seg.strip() for seg in motif_str.split(';')] if ';' in motif_str else [motif_str]
+    position_segments = [p.strip() for p in pos_str.split(';')] if ';' in pos_str else [pos_str]
     
-    # Handle semicolon-separated motif positions (take the first one)
-    motif_pos_str = str(row['motif_position']).strip()
-    if ';' in motif_pos_str:
-        phospho_pos_in_peptide = int(motif_pos_str.split(';')[0].strip())
-    else:
-        phospho_pos_in_peptide = int(motif_pos_str)
+    # Normalize positions list length to peptides list; if mismatch, truncate to min length
+    num_to_try = min(len(peptide_segments), len(position_segments))
+    peptide_segments = peptide_segments[:num_to_try]
+    position_segments = position_segments[:num_to_try]
     
     expected_position = int(row['position']) if not pd.isna(row.get('position')) and row.get('position') else None
     
-    # Perform alignment
-    alignment_result = map_peptide_to_protein(protein_seq, peptide_seq, phospho_pos_in_peptide, expected_position)
+    best_result: Optional[Dict[str, Any]] = None
+    best_identity: float = -1.0
+    best_error: Optional[str] = None
     
-    if alignment_result["match_type"] == "failed":
-        return {"alignment_success": False, "alignment_error": alignment_result.get("error", "Unknown error")}
+    for pep, pos in zip(peptide_segments, position_segments):
+        if not pep or not pos:
+            continue
+        try:
+            phospho_pos_in_peptide = int(pos)
+        except ValueError:
+            continue
+        aln = map_peptide_to_protein(protein_seq, pep, phospho_pos_in_peptide, expected_position)
+        if aln.get("match_type") == "failed":
+            best_error = aln.get("error", "Unknown error")
+            continue
+        identity = float(aln.get("identity", 0.0))
+        # Track best by identity first, then prefer exact matches on tie
+        tie_break = 1 if aln.get("match_type") == "exact" else 0
+        if identity > best_identity or (abs(identity - best_identity) < 1e-9 and best_result and tie_break > (1 if best_result.get("match_type") == "exact" else 0)):
+            best_result = aln
+            best_identity = identity
+            best_error = None
+    
+    if not best_result:
+        return {"alignment_success": False, "alignment_error": best_error or "No alignment found"}
     
     # Check minimum identity threshold (70%)
-    identity = alignment_result.get("identity", 0)
-    if identity < 70.0:
-        return {"alignment_success": False, "alignment_error": f"Identity too low: {identity:.1f}% (minimum 70%)"}
+    if best_identity < 70.0:
+        return {"alignment_success": False, "alignment_error": f"Identity too low: {best_identity:.1f}% (minimum 70%)"}
     
     # Success - return all alignment data
     result = {"alignment_success": True}
-    result.update(alignment_result)
+    result.update(best_result)
     
     # Calculate position difference
-    if expected_position and alignment_result["aligned_position"]:
-        result["position_difference"] = abs(expected_position - alignment_result["aligned_position"])
+    if expected_position and best_result.get("aligned_position"):
+        result["position_difference"] = abs(expected_position - best_result["aligned_position"])
     
     return result
 
