@@ -187,8 +187,15 @@ def process_alignment_row(row: pd.Series) -> Dict[str, Any]:
     if pd.isna(row.get('motif_position')) or not row.get('motif_position'):
         return {"alignment_success": False, "alignment_error": "No motif position"}
     
-    # Get data
-    protein_seq = str(row['full_sequence']).strip()
+    # Get data - handle multiple candidate sequences
+    protein_seq_str = str(row['full_sequence']).strip()
+    
+    # Check if this is multiple candidate sequences (semicolon-separated)
+    if ';' in protein_seq_str and row.get('sequence_type') == 'NAME_MAPPED_MULTIPLE':
+        return process_multiple_candidate_sequences(row)
+    
+    # Single sequence processing (original logic)
+    protein_seq = protein_seq_str
     
     # Prepare semicolon-separated cleaned site motifs and positions: try ALL segments
     motif_str = str(row['cleaned_site_motif']).strip()
@@ -250,6 +257,249 @@ def process_alignment_row(row: pd.Series) -> Dict[str, Any]:
     return result
 
 
+def process_multiple_candidate_sequences(row: pd.Series) -> Dict[str, Any]:
+    """Process alignment with multiple candidate sequences from name search."""
+    # Get all candidate sequences and IDs
+    protein_seq_str = str(row['full_sequence']).strip()
+    uniprot_ids_str = str(row.get('uniprot_mapped_id', '')).strip()
+    
+    candidate_sequences = [seq.strip() for seq in protein_seq_str.split(';') if seq.strip()]
+    candidate_ids = [id.strip() for id in uniprot_ids_str.split(';') if id.strip()]
+    
+    if not candidate_sequences:
+        return {"alignment_success": False, "alignment_error": "No candidate sequences found"}
+    
+    # Get all rows in this protein group to evaluate group-wide alignment
+    protein_id = row.get('Protein', '')
+    if not protein_id:
+        return {"alignment_success": False, "alignment_error": "No protein ID found"}
+    
+    # This function will be called for each row, so we need to get the group data
+    # We'll use a different approach - evaluate each candidate for the current row
+    # but with group-wide scoring logic
+    
+    # Prepare peptide data for current row
+    motif_str = str(row['cleaned_site_motif']).strip()
+    pos_str = str(row['motif_position']).strip()
+    peptide_segments = [seg.strip() for seg in motif_str.split(';')] if ';' in motif_str else [motif_str]
+    position_segments = [p.strip() for p in pos_str.split(';')] if ';' in pos_str else [pos_str]
+    
+    expected_position = int(row['position']) if not pd.isna(row.get('position')) and row.get('position') else None
+    
+    # Try each candidate sequence
+    best_overall_result = None
+    best_overall_score = -1
+    best_candidate_id = None
+    
+    for i, (candidate_seq, candidate_id) in enumerate(zip(candidate_sequences, candidate_ids)):
+        print(f"  Trying candidate {i+1}/{len(candidate_sequences)}: {candidate_id}")
+        
+        # Test alignment for this candidate
+        candidate_result = test_candidate_alignment(
+            candidate_seq, peptide_segments, position_segments, expected_position
+        )
+        
+        if candidate_result:
+            # Score this candidate: prioritize exact matches with 0 position difference
+            score = calculate_candidate_score(candidate_result, expected_position)
+            
+            print(f"    Score: {score:.1f} (identity: {candidate_result.get('identity', 0):.1f}%, "
+                  f"position_diff: {candidate_result.get('position_difference', 999)})")
+            
+            if score > best_overall_score:
+                best_overall_score = score
+                best_overall_result = candidate_result
+                best_candidate_id = candidate_id
+    
+    if not best_overall_result:
+        return {"alignment_success": False, "alignment_error": "No valid alignment found for any candidate"}
+    
+    # Update the row with the best candidate
+    if best_candidate_id:
+        # Update the row to use only the best candidate
+        row['uniprot_mapped_id'] = best_candidate_id
+        row['full_sequence'] = candidate_sequences[candidate_ids.index(best_candidate_id)]
+        row['sequence_type'] = 'NAME_MAPPED_BEST'
+        print(f"  Selected best candidate: {best_candidate_id}")
+    
+    return best_overall_result
+
+
+def test_candidate_alignment(protein_seq: str, peptide_segments: List[str], 
+                           position_segments: List[str], expected_position: Optional[int]) -> Optional[Dict[str, Any]]:
+    """Test alignment for a single candidate sequence."""
+    num_to_try = min(len(peptide_segments), len(position_segments))
+    peptide_segments = peptide_segments[:num_to_try]
+    position_segments = position_segments[:num_to_try]
+    
+    best_result: Optional[Dict[str, Any]] = None
+    best_identity: float = -1.0
+    best_error: Optional[str] = None
+    
+    for pep, pos in zip(peptide_segments, position_segments):
+        if not pep or not pos:
+            continue
+        try:
+            phospho_pos_in_peptide = int(pos)
+        except ValueError:
+            continue
+        
+        aln = map_peptide_to_protein(protein_seq, pep, phospho_pos_in_peptide, expected_position)
+        if aln.get("match_type") == "failed":
+            best_error = aln.get("error", "Unknown error")
+            continue
+        
+        identity = float(aln.get("identity", 0.0))
+        # Track best by identity first, then prefer exact matches on tie
+        tie_break = 1 if aln.get("match_type") == "exact" else 0
+        if identity > best_identity or (abs(identity - best_identity) < 1e-9 and best_result and tie_break > (1 if best_result.get("match_type") == "exact" else 0)):
+            best_result = aln
+            best_identity = identity
+            best_error = None
+    
+    if not best_result:
+        return None
+    
+    # Check minimum identity threshold (70%)
+    if best_identity < 70.0:
+        return None
+    
+    # Calculate position difference
+    position_difference = 0
+    if expected_position and best_result.get("aligned_position"):
+        position_difference = abs(expected_position - best_result["aligned_position"])
+    
+    # Check position difference threshold (150)
+    if position_difference > 150:
+        return None
+    
+    # Success - return all alignment data
+    result = {"alignment_success": True}
+    result.update(best_result)
+    result["position_difference"] = position_difference
+    
+    return result
+
+
+def calculate_candidate_score(result: Dict[str, Any], expected_position: Optional[int]) -> float:
+    """Calculate a score for a candidate alignment result."""
+    score = 0.0
+    
+    # Base score from identity
+    identity = result.get("identity", 0.0)
+    score += identity
+    
+    # Bonus for exact matches
+    if result.get("match_type") == "exact":
+        score += 50.0
+    
+    # Bonus for 0 position difference (exact position match)
+    position_diff = result.get("position_difference", 999)
+    if position_diff == 0:
+        score += 100.0
+    elif position_diff <= 10:
+        score += 50.0
+    elif position_diff <= 50:
+        score += 25.0
+    
+    return score
+
+
+def process_protein_group_with_candidates(group_df: pd.DataFrame, main_df: pd.DataFrame) -> Dict[int, Dict[str, Any]]:
+    """Process a protein group with multiple candidate sequences, finding the best overall match."""
+    first_row = group_df.iloc[0]
+    
+    # Get all candidate sequences and IDs
+    protein_seq_str = str(first_row['full_sequence']).strip()
+    uniprot_ids_str = str(first_row.get('uniprot_mapped_id', '')).strip()
+    
+    candidate_sequences = [seq.strip() for seq in protein_seq_str.split(';') if seq.strip()]
+    candidate_ids = [id.strip() for id in uniprot_ids_str.split(';') if id.strip()]
+    
+    if not candidate_sequences:
+        # Return failure for all rows
+        results = {}
+        for idx, row in group_df.iterrows():
+            results[idx] = {"alignment_success": False, "alignment_error": "No candidate sequences found"}
+        return results
+    
+    print(f"  Found {len(candidate_sequences)} candidate sequences")
+    
+    # Evaluate each candidate against ALL phosphosites in the group
+    best_candidate_id = None
+    best_candidate_score = -1
+    best_candidate_results = {}
+    
+    for i, (candidate_seq, candidate_id) in enumerate(zip(candidate_sequences, candidate_ids)):
+        print(f"  Testing candidate {i+1}/{len(candidate_sequences)}: {candidate_id}")
+        
+        # Test this candidate against all phosphosites in the group
+        candidate_results = {}
+        candidate_scores = []
+        all_successful = True
+        
+        for idx, row in group_df.iterrows():
+            # Prepare peptide data for this row
+            motif_str = str(row['cleaned_site_motif']).strip()
+            pos_str = str(row['motif_position']).strip()
+            peptide_segments = [seg.strip() for seg in motif_str.split(';')] if ';' in motif_str else [motif_str]
+            position_segments = [p.strip() for p in pos_str.split(';')] if ';' in pos_str else [pos_str]
+            
+            expected_position = int(row['position']) if not pd.isna(row.get('position')) and row.get('position') else None
+            
+            # Test alignment for this candidate and this phosphosite
+            result = test_candidate_alignment(
+                candidate_seq, peptide_segments, position_segments, expected_position
+            )
+            
+            if result:
+                candidate_results[idx] = result
+                score = calculate_candidate_score(result, expected_position)
+                candidate_scores.append(score)
+            else:
+                all_successful = False
+                candidate_results[idx] = {"alignment_success": False, "alignment_error": "No valid alignment found"}
+                break
+        
+        if all_successful:
+            # Calculate overall group score
+            group_score = sum(candidate_scores)
+            avg_position_diff = sum(r.get('position_difference', 0) for r in candidate_results.values()) / len(candidate_results)
+            
+            print(f"    Group score: {group_score:.1f}, Avg position diff: {avg_position_diff:.1f}")
+            
+            # Prioritize candidates with 0 position difference across all sites
+            if avg_position_diff == 0:
+                group_score += 1000  # Massive bonus for perfect position matches
+            
+            if group_score > best_candidate_score:
+                best_candidate_score = group_score
+                best_candidate_id = candidate_id
+                best_candidate_results = candidate_results.copy()
+                print(f"    → New best candidate!")
+    
+    if not best_candidate_results:
+        # Return failure for all rows
+        results = {}
+        for idx, row in group_df.iterrows():
+            results[idx] = {"alignment_success": False, "alignment_error": "No valid alignment found for any candidate"}
+        return results
+    
+    # Update ALL rows in the group with the best candidate in the main dataframe
+    best_candidate_seq = candidate_sequences[candidate_ids.index(best_candidate_id)]
+    group_indices = group_df.index.tolist()
+    
+    for idx in group_indices:
+        main_df.at[idx, 'uniprot_mapped_id'] = best_candidate_id
+        main_df.at[idx, 'full_sequence'] = best_candidate_seq
+        main_df.at[idx, 'sequence_type'] = 'NAME_MAPPED_BEST'
+    
+    print(f"  Selected best candidate: {best_candidate_id} (score: {best_candidate_score:.1f})")
+    print(f"  Updated {len(group_indices)} rows in the group with best candidate")
+    
+    return best_candidate_results
+
+
 def process_dataset(input_path: str, species: str, output_path: str) -> None:
     """Process the dataset to align motifs to full sequences."""
     print(f"Loading dataset: {input_path}")
@@ -278,18 +528,39 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
     rows_with_sequence = df[df['full_sequence'].notna() & (df['full_sequence'] != '')]
     print(f"Found {len(rows_with_sequence)} rows with full sequences to align")
     
-    # Process each row with full sequence
-    for idx, row in rows_with_sequence.iterrows():
-        print(f"Processing row {idx + 1} (Protein: {row.get('Protein', 'N/A')})")
+    # Group by protein ID for group-wide evaluation
+    protein_groups = rows_with_sequence.groupby('Protein')
+    print(f"Found {len(protein_groups)} protein groups to process")
+    
+    # Process each protein group
+    for protein_id, group_df in protein_groups:
+        print(f"\nProcessing protein group: {protein_id} ({len(group_df)} phosphosites)")
         
-        alignment_result = process_alignment_row(row)
-        for key, value in alignment_result.items():
-            df.at[idx, key] = value
-        
-        if alignment_result.get('alignment_success', False):
-            print(f"  ✓ Alignment successful: position {alignment_result.get('aligned_position', 'N/A')}")
+        # Check if this group has multiple candidate sequences
+        first_row = group_df.iloc[0]
+        if (';' in str(first_row['full_sequence']) and 
+            first_row.get('sequence_type') == 'NAME_MAPPED_MULTIPLE'):
+            
+            # Process group with multiple candidates
+            group_results = process_protein_group_with_candidates(group_df, df)
+            
+            # Update the dataframe with results
+            for idx, result in group_results.items():
+                for key, value in result.items():
+                    df.at[idx, key] = value
         else:
-            print(f"  ✗ Alignment failed: {alignment_result.get('alignment_error', 'Unknown error')}")
+            # Process each row individually (original logic)
+            for idx, row in group_df.iterrows():
+                print(f"  Processing phosphosite {idx + 1}")
+                
+                alignment_result = process_alignment_row(row)
+                for key, value in alignment_result.items():
+                    df.at[idx, key] = value
+                
+                if alignment_result.get('alignment_success', False):
+                    print(f"    ✓ Alignment successful: position {alignment_result.get('aligned_position', 'N/A')}")
+                else:
+                    print(f"    ✗ Alignment failed: {alignment_result.get('alignment_error', 'Unknown error')}")
     
     # Reorder columns - put alignment columns at the end
     other_cols = [col for col in df.columns if col not in alignment_columns]
