@@ -60,7 +60,7 @@ def get_all_valid_uniprot_ids(id_value: str) -> List[str]:
 def find_best_alignment_with_thresholds(row: pd.Series, min_identity: float, max_position_difference: Optional[int]) -> Dict[str, Any]:
     """Find the best alignment that meets both identity and position difference thresholds.
     
-    If the best alignment fails position difference threshold, try alternative alignment positions.
+    Returns alignment with flagging for manual review if position difference > 150.
     """
     from align_to_full_seq import map_peptide_to_protein
     
@@ -90,6 +90,7 @@ def find_best_alignment_with_thresholds(row: pd.Series, min_identity: float, max
     
     best_result = None
     best_identity = -1.0
+    best_position_diff = float('inf')
     best_error = None
     
     # Try each peptide segment
@@ -104,36 +105,52 @@ def find_best_alignment_with_thresholds(row: pd.Series, min_identity: float, max
         # Get all alignment candidates for this peptide
         candidates = _get_all_alignment_candidates(protein_seq, pep, phospho_pos_in_peptide, expected_position)
         
-        # Try each candidate to find one that meets thresholds
+        # Try each candidate to find the best one
         for candidate in candidates:
             identity = candidate.get("identity", 0.0)
             
             # Check identity threshold
             if identity < min_identity:
                 continue
-                
-            # Check position difference threshold
-            if max_position_difference is not None and expected_position:
-                pos_diff = abs(expected_position - candidate.get("aligned_position", 0))
-                if pos_diff > max_position_difference:
-                    continue
             
-            # This candidate meets all thresholds
-            if identity > best_identity:
+            # Calculate position difference
+            pos_diff = abs(expected_position - candidate.get("aligned_position", 0)) if expected_position and candidate.get("aligned_position") else 0
+            
+            # Check if this is a better candidate
+            is_better = False
+            if best_result is None:
+                is_better = True
+            else:
+                # Prefer candidates with better position match if identity is similar
+                if identity >= best_identity * 0.95:  # Within 5% of best identity
+                    if pos_diff < best_position_diff:
+                        is_better = True
+                elif identity > best_identity:
+                    is_better = True
+            
+            if is_better:
                 best_result = candidate
                 best_identity = identity
+                best_position_diff = pos_diff
                 best_error = None
     
     if not best_result:
         return {"alignment_success": False, "alignment_error": best_error or "No alignment found meeting thresholds"}
     
+    # Calculate final position difference
+    final_pos_diff = best_position_diff
+    if expected_position and best_result.get("aligned_position"):
+        final_pos_diff = abs(expected_position - best_result["aligned_position"])
+    
     # Success - return all alignment data
     result = {"alignment_success": True}
     result.update(best_result)
+    result["position_difference"] = final_pos_diff
     
-    # Calculate position difference
-    if expected_position and best_result.get("aligned_position"):
-        result["position_difference"] = abs(expected_position - best_result["aligned_position"])
+    # Flag for manual review if position difference is too high
+    if max_position_difference is not None and final_pos_diff > max_position_difference:
+        result["manual_review_flag"] = True
+        result["alignment_error"] = f"Position difference {final_pos_diff} exceeds threshold {max_position_difference}"
     
     return result
 
@@ -193,7 +210,8 @@ def try_group_mapping_and_alignment(group_df: pd.DataFrame, species: str, min_id
     1. For each column type (uniprot → swissprot → trembl), try ALL semicolon-separated IDs from ALL rows
     2. Only move to next column type if ALL IDs from current column fail
     3. For each ID, verify species and try to align ALL rows in the group
-    4. Accept first ID where ALL rows align successfully
+    4. Accept first ID where ALL rows align successfully with position difference <= threshold
+    5. If no ID meets position threshold but some align, keep the best one and flag for manual review
     """
     # Define column priority. Try UniProt first, then SWISS-PROT, then TREMBL for all species
     column_priority = [('uniprot', 'UniProt'), ('swissprot_id', 'SWISS-PROT'), ('trembl_id', 'TREMBL')]
@@ -255,6 +273,8 @@ def try_group_mapping_and_alignment(group_df: pd.DataFrame, species: str, min_id
                 # Try to align ALL rows in the group
                 per_row_results: Dict[int, Dict[str, Any]] = {}
                 all_ok = True
+                has_position_issues = False
+                max_pos_diff = 0
                 
                 for idx, row in group_df.iterrows():
                     temp_row = row.copy()
@@ -268,14 +288,30 @@ def try_group_mapping_and_alignment(group_df: pd.DataFrame, species: str, min_id
                         break
                     else:
                         identity = aln.get('identity', 0.0)
-                        print(f"      ✓ Row {idx} aligned (identity: {identity:.1f}%)")
+                        pos_diff = aln.get('position_difference', 0)
+                        max_pos_diff = max(max_pos_diff, pos_diff)
+                        
+                        if pos_diff > max_position_difference:
+                            has_position_issues = True
+                            print(f"      ⚠ Row {idx} aligned but position difference {pos_diff} > {max_position_difference}")
+                        else:
+                            print(f"      ✓ Row {idx} aligned (identity: {identity:.1f}%, pos_diff: {pos_diff})")
                 
                 if all_ok:
-                    print(f"      ✓ SUCCESS: All rows aligned with {label} ID {uniprot_id}")
-                    # Clear alignment errors for successful alignments
-                    for row_idx, aln in per_row_results.items():
-                        if aln.get('alignment_success', False):
-                            aln['alignment_error'] = ''
+                    if has_position_issues:
+                        print(f"      ⚠ PARTIAL SUCCESS: All rows aligned with {label} ID {uniprot_id} but position differences exceed threshold (max: {max_pos_diff})")
+                        # Flag for manual review but still return the result
+                        for row_idx, aln in per_row_results.items():
+                            if aln.get('alignment_success', False) and aln.get('position_difference', 0) > max_position_difference:
+                                aln['manual_review_flag'] = True
+                                aln['alignment_error'] = f"Position difference {aln.get('position_difference', 0)} exceeds threshold {max_position_difference}"
+                    else:
+                        print(f"      ✓ SUCCESS: All rows aligned with {label} ID {uniprot_id}")
+                        # Clear alignment errors for successful alignments
+                        for row_idx, aln in per_row_results.items():
+                            if aln.get('alignment_success', False):
+                                aln['alignment_error'] = ''
+                    
                     return {
                         'uniprot_mapped_id': uniprot_id,
                         'mapping_source': label,
@@ -331,16 +367,31 @@ def process_dataset(input_path: str, species: str, output_path: str, min_identit
             df.loc[group_idx, 'full_sequence'] = result['full_sequence']
             df.loc[group_idx, 'sequence_length'] = result['sequence_length']
             df.loc[group_idx, 'sequence_type'] = result['sequence_type']
+            
+            # Apply per-row results and handle manual review flags
+            has_manual_review = False
             for row_idx, aln in result['per_row_results'].items():
                 for key, val in aln.items():
                     df.at[row_idx, key] = val
-            # Clear manual review flag if present
+                if aln.get('manual_review_flag', False):
+                    has_manual_review = True
+            
+            # Set group-level manual review flag if any row needs review
             if 'manual_review_flag' in df.columns:
-                df.loc[group_idx, 'manual_review_flag'] = False
+                df.loc[group_idx, 'manual_review_flag'] = has_manual_review
+            
             if 'processing_notes' in df.columns:
-                df.loc[group_idx, 'processing_notes'] = df.loc[group_idx, 'processing_notes'].fillna('').apply(
-                    lambda x: (str(x) + '; remapped_ok') if x else 'remapped_ok')
-            print("  ✓ Remap successful for group")
+                if has_manual_review:
+                    df.loc[group_idx, 'processing_notes'] = df.loc[group_idx, 'processing_notes'].fillna('').apply(
+                        lambda x: (str(x) + '; remapped_with_position_issues') if x else 'remapped_with_position_issues')
+                else:
+                    df.loc[group_idx, 'processing_notes'] = df.loc[group_idx, 'processing_notes'].fillna('').apply(
+                        lambda x: (str(x) + '; remapped_ok') if x else 'remapped_ok')
+            
+            if has_manual_review:
+                print("  ⚠ Remap successful but flagged for manual review due to position differences")
+            else:
+                print("  ✓ Remap successful for group")
         else:
             failed_groups += 1
             if 'manual_review_flag' in df.columns:

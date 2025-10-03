@@ -233,13 +233,19 @@ def process_alignment_row(row: pd.Series) -> Dict[str, Any]:
     if best_identity < 70.0:
         return {"alignment_success": False, "alignment_error": f"Identity too low: {best_identity:.1f}% (minimum 70%)"}
     
+    # Calculate position difference
+    position_difference = 0
+    if expected_position and best_result.get("aligned_position"):
+        position_difference = abs(expected_position - best_result["aligned_position"])
+    
+    # Check position difference threshold (150)
+    if position_difference > 150:
+        return {"alignment_success": False, "alignment_error": f"Position difference too large: {position_difference} (maximum 150)"}
+    
     # Success - return all alignment data
     result = {"alignment_success": True}
     result.update(best_result)
-    
-    # Calculate position difference
-    if expected_position and best_result.get("aligned_position"):
-        result["position_difference"] = abs(expected_position - best_result["aligned_position"])
+    result["position_difference"] = position_difference
     
     return result
 
@@ -320,6 +326,7 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
             print(f"\nPosition differences:")
             print(f"  Mean: {valid_diffs.mean():.1f}, Median: {valid_diffs.median():.1f}")
             print(f"  <=5: {(valid_diffs <= 5).sum()}, 6-20: {((valid_diffs > 5) & (valid_diffs <= 20)).sum()}, >20: {(valid_diffs > 20).sum()}")
+            print(f"  Max: {valid_diffs.max():.1f} (all alignments with pos_diff > 150 were rejected)")
     
     # Error breakdown
     if len(df) - successful > 0:
