@@ -318,7 +318,12 @@ def process_multiple_candidate_sequences(row: pd.Series) -> Dict[str, Any]:
     if best_candidate_id:
         # Update the row to use only the best candidate
         row['uniprot_mapped_id'] = best_candidate_id
-        row['full_sequence'] = candidate_sequences[candidate_ids.index(best_candidate_id)]
+        chosen_seq = candidate_sequences[candidate_ids.index(best_candidate_id)]
+        row['full_sequence'] = chosen_seq
+        try:
+            row['sequence_length'] = len(chosen_seq)
+        except Exception:
+            row['sequence_length'] = None
         row['sequence_type'] = 'NAME_MAPPED_BEST'
         print(f"  Selected best candidate: {best_candidate_id}")
     
@@ -479,19 +484,26 @@ def process_protein_group_with_candidates(group_df: pd.DataFrame, main_df: pd.Da
                 print(f"    → New best candidate!")
     
     if not best_candidate_results:
-        # Return failure for all rows
+        # Return failure for all rows and mark group for manual review
         results = {}
         for idx, row in group_df.iterrows():
             results[idx] = {"alignment_success": False, "alignment_error": "No valid alignment found for any candidate"}
+        try:
+            for idx in group_df.index.tolist():
+                main_df.at[idx, 'manual_review_flag'] = True
+        except Exception:
+            pass
         return results
     
     # Update ALL rows in the group with the best candidate in the main dataframe
     best_candidate_seq = candidate_sequences[candidate_ids.index(best_candidate_id)]
     group_indices = group_df.index.tolist()
+    best_seq_len = len(best_candidate_seq) if isinstance(best_candidate_seq, str) else None
     
     for idx in group_indices:
         main_df.at[idx, 'uniprot_mapped_id'] = best_candidate_id
         main_df.at[idx, 'full_sequence'] = best_candidate_seq
+        main_df.at[idx, 'sequence_length'] = best_seq_len
         main_df.at[idx, 'sequence_type'] = 'NAME_MAPPED_BEST'
     
     print(f"  Selected best candidate: {best_candidate_id} (score: {best_candidate_score:.1f})")
@@ -561,6 +573,8 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
                     print(f"    ✓ Alignment successful: position {alignment_result.get('aligned_position', 'N/A')}")
                 else:
                     print(f"    ✗ Alignment failed: {alignment_result.get('alignment_error', 'Unknown error')}")
+                    # Mark for manual review when alignment fails for this row
+                    df.at[idx, 'manual_review_flag'] = True
     
     # Reorder columns - put alignment columns at the end
     other_cols = [col for col in df.columns if col not in alignment_columns]

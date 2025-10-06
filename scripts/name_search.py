@@ -9,6 +9,8 @@ Usage:
     python name_search.py --input data.csv --species rat --output results.csv
 """
 
+# Run this script on the command line with: python scripts/name_search.py -i data/processed/rat/cleaned_test_data_grouped_processed_aligned_remapped.csv -s rat
+
 import argparse
 import pandas as pd
 import requests
@@ -79,13 +81,19 @@ def search_uniprot_by_name(protein_name: str, species: str, max_results: int = 5
         results = []
         
         for entry in data.get('results', []):
+            # Determine reviewed status using available fields
+            entry_type = str(entry.get('entryType', '')).lower()
+            reviewed_flag = bool(entry.get('reviewed', False))
+            is_reviewed = reviewed_flag or (entry_type == 'reviewed')
+
             protein_info = {
                 'accession': entry.get('primaryAccession', ''),
                 'id': entry.get('uniProtkbId', ''),
                 'name': entry.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value', ''),
                 'organism': entry.get('organism', {}).get('scientificName', ''),
                 'sequence': entry.get('sequence', {}).get('value', ''),
-                'length': entry.get('sequence', {}).get('length', 0)
+                'length': entry.get('sequence', {}).get('length', 0),
+                'reviewed': is_reviewed,
             }
             results.append(protein_info)
         
@@ -125,52 +133,27 @@ def extract_first_description(protein_description: str) -> str:
 
 def get_all_protein_matches(protein_name: str, species: str) -> List[dict]:
     """
-    Get all matching proteins from UniProt search.
-    
-    Args:
-        protein_name: Protein name to search for
-        species: Species name
-        
-    Returns:
-        List of protein info dictionaries
+    Get all matching proteins from UniProt search. Keep UniProt's original
+    relevance order within equal-length accessions, but order groups by
+    accession length (shortest first). Only entries with sequences kept.
     """
     results = search_uniprot_by_name(protein_name, species, max_results=10)
-    
     if not results:
         return []
-    
-    # Sort by name similarity score for reference
-    for protein in results:
-        uniprot_name = protein['name'].lower()
-        search_name = protein_name.lower()
-        
-        # Calculate similarity score
-        score = 0
-        
-        # Exact match gets highest score
-        if search_name in uniprot_name or uniprot_name in search_name:
-            score += 100
-        
-        # Word overlap scoring
-        search_words = set(search_name.split())
-        uniprot_words = set(uniprot_name.split())
-        word_overlap = len(search_words.intersection(uniprot_words))
-        score += word_overlap * 10
-        
-        # Length similarity
-        length_diff = abs(len(search_name) - len(uniprot_name))
-        score += max(0, 50 - length_diff)
-        
-        protein['name_score'] = score
-    
-    # Sort by score (highest first)
-    results.sort(key=lambda x: x['name_score'], reverse=True)
-    
-    logger.info(f"Found {len(results)} UniProt entries for '{protein_name}'")
-    for i, protein in enumerate(results[:3]):  # Log top 3
-        logger.info(f"  {i+1}. {protein['accession']} - {protein['name']} (score: {protein['name_score']})")
-    
-    return results
+
+    # Keep only entries that include a full sequence
+    results_with_seq = [p for p in results if p.get('sequence')]
+
+    # Stable sort by accession length; Python sort is stable so UniProt
+    # original order is preserved within each length bucket
+    ordered = sorted(results_with_seq, key=lambda p: len(p.get('accession', '')))
+
+    logger.info(f"Found {len(ordered)} UniProt entries for '{protein_name}' (shortest accession first)")
+    top_preview = ", ".join(p['accession'] for p in ordered[:3])
+    if top_preview:
+        logger.info(f"  Top accessions: {top_preview}")
+
+    return ordered
 
 
 def process_dataset_by_name(df: pd.DataFrame, species: str) -> pd.DataFrame:
