@@ -1,237 +1,182 @@
 #!/usr/bin/env python3
 """
-Enhanced script to fetch protein sequences using multiple identifier types.
-Tries in order: SWISS-PROT → Ensembl → TREMBL → RefSeq
+Extract full protein sequences from UniProt using uniprot_mapped_id.
 """
 
 import pandas as pd
-import requests
-import time
+import argparse
+import os
+from typing import Optional, Tuple
 from Bio import ExPASy
 from Bio import SwissProt
+import time
 
-def get_sequence_via_swiss_prot(swiss_prot_id):
-    """Fetch protein sequence from UniProt using SWISS-PROT ID."""
-    if pd.isna(swiss_prot_id) or swiss_prot_id is None:
+
+def get_uniprot_sequence(uniprot_id: str) -> Optional[Tuple[str, str]]:
+    """Get full protein sequence from UniProt, handling isoforms."""
+    if pd.isna(uniprot_id) or not uniprot_id:
         return None
     
     try:
-        clean_id = str(swiss_prot_id).strip()
-        handle = ExPASy.get_sprot_raw(clean_id)
+        clean_id = str(uniprot_id).strip()
+        
+        # Handle multiple IDs separated by semicolons
+        if ';' in clean_id:
+            ids = [id.strip() for id in clean_id.split(';') if id.strip()]
+            for single_id in ids:
+                result = _get_single_uniprot_sequence(single_id)
+                if result:
+                    return result
+            return None
+        else:
+            return _get_single_uniprot_sequence(clean_id)
+    except Exception as e:
+        print(f"  ✗ UniProt sequence fetch failed for {uniprot_id}: {e}")
+        return None
+
+
+def _get_single_uniprot_sequence(uniprot_id: str) -> Optional[Tuple[str, str]]:
+    """Get sequence for a single UniProt ID, using specific isoform if available."""
+    try:
+        # First, try to get the sequence directly
+        handle = ExPASy.get_sprot_raw(uniprot_id)
         record = SwissProt.read(handle)
         handle.close()
-        return record.sequence
-    except Exception as e:
-        print(f"  ✗ SWISS-PROT {swiss_prot_id}: {e}")
-        return None
-
-
-
-def get_sequence_via_ensembl(ensembl_id):
-    """Fetch protein sequence using Ensembl ID via Ensembl REST API."""
-    if pd.isna(ensembl_id) or ensembl_id is None:
-        return None
-    
-    try:
-        clean_id = str(ensembl_id).strip()
-        url = f"http://rest.ensembl.org/sequence/id/{clean_id}?content-type=text/x-fasta;type=protein"
-        response = requests.get(url, timeout=10)
         
-        if response.status_code == 200:
-            fasta_text = response.text
-            # Extract sequence from FASTA format
-            lines = fasta_text.strip().split('\n')
-            sequence = ''.join(lines[1:])  # Skip header line
-            return sequence
+        sequence = record.sequence
+        
+        # Check if this is an isoform by looking at the original uniprot_id
+        if '-' in uniprot_id and uniprot_id.split('-')[-1].isdigit():
+            # This is a specific isoform - use it directly
+            print(f"    Using specific isoform: {uniprot_id}")
+            return sequence, "isoform"
         else:
-            print(f"  ✗ Ensembl {ensembl_id}: HTTP {response.status_code}")
-            return None
+            # This is canonical - use it directly
+            print(f"    Using canonical sequence: {uniprot_id}")
+            return sequence, "canonical"
+            
     except Exception as e:
-        print(f"  ✗ Ensembl {ensembl_id}: {e}")
+        print(f"  ✗ Single UniProt sequence fetch failed for {uniprot_id}: {e}")
         return None
 
-def get_sequence_via_refseq(refseq_id):
-    """Fetch protein sequence using RefSeq ID via UniProt ID mapping."""
-    if pd.isna(refseq_id) or refseq_id is None:
-        return None
+
+def process_dataset(input_path: str, species: str, output_path: str) -> None:
+    """Process the dataset to extract full protein sequences."""
+    print(f"Loading dataset: {input_path}")
+    df = pd.read_csv(input_path)
+    print(f"Loaded {len(df)} rows")
     
-    try:
-        clean_id = str(refseq_id).strip()
-        # Map RefSeq to UniProt accession
-        url = "https://www.uniprot.org/uploadlists/"
-        params = {
-            "from": "P_REFSEQ_AC",
-            "to": "ACC",
-            "format": "tab",
-            "query": clean_id
-        }
-        response = requests.post(url, data=params, timeout=10)
+    # Check if uniprot_mapped_id column exists
+    if 'uniprot_mapped_id' not in df.columns:
+        print("Error: 'uniprot_mapped_id' column not found in dataset")
+        return
+    
+    # Add new columns for sequence data
+    df['full_sequence'] = None
+    df['sequence_length'] = None
+    df['sequence_type'] = None
+    df['sequence_fetch_success'] = False
+    df['sequence_fetch_error'] = None
+    df['sequence_length_warning'] = None
+    
+    # Process each row
+    for idx, row in df.iterrows():
+        print(f"\nRow {idx + 1}/{len(df)}")
+        print(f"  UniProt ID: {row.get('uniprot_mapped_id', 'N/A')}")
         
-        if response.status_code == 200 and response.text.strip():
-            lines = response.text.strip().split('\n')
-            if len(lines) > 1:  # Has data beyond header
-                uniprot_id = lines[1].split('\t')[1]
-                if uniprot_id and uniprot_id != 'null':
-                    # Now get sequence using UniProt ID
-                    return get_sequence_via_swiss_prot(uniprot_id)
+        # Get full sequence from UniProt
+        sequence_data = get_uniprot_sequence(row['uniprot_mapped_id'])
         
-        print(f"  ✗ RefSeq {refseq_id}: No UniProt mapping found")
-        return None
-    except Exception as e:
-        print(f"  ✗ RefSeq {refseq_id}: {e}")
-        return None
+        if sequence_data:
+            full_sequence, sequence_type = sequence_data
+            sequence_length = len(full_sequence)
+            df.at[idx, 'full_sequence'] = full_sequence
+            df.at[idx, 'sequence_length'] = sequence_length
+            df.at[idx, 'sequence_type'] = sequence_type
+            df.at[idx, 'sequence_fetch_success'] = True
+            
+            # Check if sequence length is smaller than phosphorylation position
+            warning_message = None
+            if not pd.isna(row.get('position')) and row.get('position'):
+                try:
+                    phospho_position = int(row['position'])
+                    if sequence_length < phospho_position:
+                        warning_message = f"Sequence length ({sequence_length}) < phosphorylation position ({phospho_position})"
+                        df.at[idx, 'sequence_length_warning'] = warning_message
+                        print(f"  ⚠ WARNING: {warning_message}")
+                except (ValueError, TypeError):
+                    pass
+            
+            if not warning_message:
+                print(f"  ✓ Success: {sequence_type}, {sequence_length} amino acids")
+        else:
+            df.at[idx, 'sequence_fetch_success'] = False
+            df.at[idx, 'sequence_fetch_error'] = 'Could not fetch sequence from UniProt'
+            print(f"  ✗ Failed to fetch sequence")
+        
+        # Add a small delay to be respectful to the APIs
+        time.sleep(0.1)
+    
+    # Reorder columns to put sequence data after mapping results
+    mapping_cols = ['uniprot_mapped_id', 'mapping_source', 'mapping_success']
+    sequence_cols = ['full_sequence', 'sequence_length', 'sequence_type', 'sequence_fetch_success', 'sequence_fetch_error', 'sequence_length_warning']
+    other_cols = [col for col in df.columns if col not in mapping_cols + sequence_cols]
+    df_reordered = df[mapping_cols + sequence_cols + other_cols]
+    
+    # Save the results
+    print(f"\nSaving results to: {output_path}")
+    df_reordered.to_csv(output_path, index=False)
+    
+    # Print summary statistics
+    successful_fetches = df['sequence_fetch_success'].sum()
+    print(f"\nProcessing Summary:")
+    print(f"  Total rows: {len(df)}")
+    print(f"  Successful sequence fetches: {successful_fetches}")
+    print(f"  Failed sequence fetches: {len(df) - successful_fetches}")
+    print(f"  Success rate: {successful_fetches/len(df)*100:.1f}%")
+    
+    # Print warning statistics
+    warnings_count = df['sequence_length_warning'].notna().sum()
+    if warnings_count > 0:
+        print(f"\nSequence length warnings: {warnings_count}")
+        print("  These rows have sequence length < phosphorylation position (potential mapping issues)")
+        warning_rows = df[df['sequence_length_warning'].notna()]
+        for idx, row in warning_rows.iterrows():
+            print(f"    Row {idx + 1}: {row['uniprot_mapped_id']} - {row['sequence_length_warning']}")
+    
+    # Print error breakdown
+    if len(df) - successful_fetches > 0:
+        print(f"\nError breakdown:")
+        error_counts = df[~df['sequence_fetch_success']]['sequence_fetch_error'].value_counts()
+        for error, count in error_counts.items():
+            print(f"  {error}: {count}")
 
-def get_sequence_via_trembl(trembl_id):
-    """Fetch protein sequence using TREMBL ID via UniProt."""
-    if pd.isna(trembl_id) or trembl_id is None:
-        return None
-    
-    try:
-        clean_id = str(trembl_id).strip()
-        # TREMBL IDs are already UniProt IDs, so use directly
-        return get_sequence_via_swiss_prot(clean_id)
-    except Exception as e:
-        print(f"  ✗ TREMBL {trembl_id}: {e}")
-        return None
-
-def get_sequence_comprehensive(protein_data):
-    """
-    Try to get sequence using multiple identifier types in order:
-    SWISS-PROT → Ensembl → TREMBL → RefSeq
-    """
-    swiss_prot_id = protein_data['Protein Identifier (SWISS-PROT)']
-    ensembl_id = protein_data['Protein Identifier (Ensembl)']
-    refseq_id = protein_data['Protein Identifier (RefSeq)']
-    trembl_id = protein_data['Protein Identifier (TREMBL)']
-    
-    # Try SWISS-PROT first
-    if swiss_prot_id:
-        sequence = get_sequence_via_swiss_prot(swiss_prot_id)
-        if sequence:
-            return sequence, 'SWISS-PROT'
-    
-    # Try Ensembl
-    if ensembl_id:
-        sequence = get_sequence_via_ensembl(ensembl_id)
-        if sequence:
-            return sequence, 'Ensembl'
-    
-    # Try TREMBL
-    if trembl_id:
-        sequence = get_sequence_via_trembl(trembl_id)
-        if sequence:
-            return sequence, 'TREMBL'
-    
-    # Try RefSeq last
-    if refseq_id:
-        sequence = get_sequence_via_refseq(refseq_id)
-        if sequence:
-            return sequence, 'RefSeq'
-    
-    return None, None
 
 def main():
-    print("🧬 Enhanced Protein Sequence Fetching")
-    print("=" * 50)
-    print("Trying identifiers in order: SWISS-PROT → Ensembl → TREMBL → RefSeq")
-    print()
+    parser = argparse.ArgumentParser(description='Extract full protein sequences from UniProt')
+    parser.add_argument('--input', '-i', required=True, help='Path to input CSV file (mapped data)')
+    parser.add_argument('--species', '-s', required=True, choices=['mouse', 'rat'], help='Species name')
+    parser.add_argument('--output', '-o', help='Path to output CSV file (default: data/processed/{species}/input_filename_sequences.csv)')
     
-    # Load the enhanced cleaned data
-    print("📖 Loading enhanced cleaned phosphorylation data...")
-    df = pd.read_parquet("../data/processed/mouse/cleaned_phosphomouse_site_data.parquet")
-    print(f"Loaded {len(df):,} phosphorylation sites")
+    args = parser.parse_args()
     
-    # Get unique proteins (combine all identifier types)
-    print("🔍 Identifying unique proteins...")
-    unique_proteins = set()
+    # Determine output path
+    if args.output:
+        output_path = args.output
+    else:
+        # Create output directory
+        output_dir = os.path.join('data', 'processed', args.species)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Get input filename and create sequences filename
+        input_filename = os.path.basename(args.input)
+        base_name = os.path.splitext(input_filename)[0]
+        output_filename = f"{base_name}_sequences.csv"
+        output_path = os.path.join(output_dir, output_filename)
     
-    for col in ['Protein Identifier (SWISS-PROT)', 'Protein Identifier (Ensembl)', 
-                'Protein Identifier (RefSeq)', 'Protein Identifier (TREMBL)']:
-        unique_proteins.update(df[col].dropna().unique())
-    
-    print(f"Found {len(unique_proteins):,} unique protein identifiers across all types")
-    
-    # Fetch sequences
-    print("🔍 Fetching protein sequences...")
-    protein_sequences = {}
-    source_stats = {'SWISS-PROT': 0, 'Ensembl': 0, 'RefSeq': 0, 'TREMBL': 0, 'Failed': 0}
-    
-    # Create a mapping of all identifiers to their protein data
-    protein_mapping = {}
-    for idx, row in df.iterrows():
-        for col in ['Protein Identifier (SWISS-PROT)', 'Protein Identifier (Ensembl)', 
-                    'Protein Identifier (RefSeq)', 'Protein Identifier (TREMBL)']:
-            identifier = row[col]
-            if pd.notna(identifier):
-                protein_mapping[identifier] = row
-    
-    processed = 0
-    for identifier in unique_proteins:
-        if identifier in protein_mapping:
-            protein_data = protein_mapping[identifier]
-            processed += 1
-            
-            print(f"Processing {processed}/{len(unique_proteins)}: {identifier}")
-            
-            sequence, source = get_sequence_comprehensive(protein_data)
-            if sequence:
-                protein_sequences[identifier] = sequence
-                source_stats[source] += 1
-                print(f"  ✓ Success via {source}: {len(sequence)} amino acids")
-            else:
-                source_stats['Failed'] += 1
-                print(f"  ✗ Failed with all methods")
-            
-            # Be respectful to the servers
-            time.sleep(0.5)
-    
-    # Add sequences to dataframe
-    print("\n📝 Adding sequences to dataframe...")
-    df['Full Protein Sequence'] = None
-    df['Sequence Source'] = None
-    
-    for idx, row in df.iterrows():
-        # Try to find a sequence for this row
-        for col in ['Protein Identifier (SWISS-PROT)', 'Protein Identifier (Ensembl)', 
-                    'Protein Identifier (RefSeq)', 'Protein Identifier (TREMBL)']:
-            identifier = row[col]
-            if pd.notna(identifier) and identifier in protein_sequences:
-                df.at[idx, 'Full Protein Sequence'] = protein_sequences[identifier]
-                # Find which source was used
-                sequence, source = get_sequence_comprehensive(row)
-                if sequence:
-                    df.at[idx, 'Sequence Source'] = source
-                break
-    
-    # Save enhanced data
-    output_file = "../data/processed/mouse/cleaned_phosphorylation_sites_with_sequences.parquet"
-    df.to_parquet(output_file, index=False)
-    
-    # Report results
-    sequences_added = df['Full Protein Sequence'].notna().sum()
-    print(f"\n✅ Enhanced sequence fetching complete!")
-    print(f"Sequences retrieved: {len(protein_sequences):,}/{len(unique_proteins):,}")
-    print(f"Sites with sequences: {sequences_added:,}/{len(df):,} ({sequences_added/len(df)*100:.1f}%)")
-    print(f"Enhanced data saved to: {output_file}")
-    
-    print(f"\n📊 Success by Source:")
-    for source, count in source_stats.items():
-        if source != 'Failed':
-            print(f"  {source:12s}: {count:,} sequences")
-    print(f"  {'Failed':12s}: {source_stats['Failed']:,} sequences")
+    # Process the dataset
+    process_dataset(args.input, args.species, output_path)
+
 
 if __name__ == "__main__":
     main()
-
-"""
-✅ Enhanced sequence fetching complete!
-Sequences retrieved: 6,852/6,940
-Sites with sequences: 5,373/5,523 (97.3%)
-
-📊 Success by Source:
-  SWISS-PROT  : 5,809 sequences
-  Ensembl     : 660 sequences
-  RefSeq      : 0 sequences
-  TREMBL      : 383 sequences
-  Failed      : 88 sequences
-"""
