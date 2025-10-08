@@ -48,14 +48,9 @@ def read_processed(path: str) -> pd.DataFrame:
 # -------------------- Rat-specific logic --------------------
 
 def filter_ids_rat(df: pd.DataFrame, config: Dict) -> pd.DataFrame:
-    required_cols = config.get('filters', {}).get('required_ids', [])
-    if not required_cols:
-        return df
-    present = [c for c in required_cols if c in df.columns]
-    if not present:
-        return df
-    mask = df[present].notna().any(axis=1)
-    return df.loc[mask].copy()
+    # Don't remove rows based on missing IDs - keep all rows
+    # Only apply localization threshold filtering
+    return df
 
 
 def apply_localization_threshold(df: pd.DataFrame, config: Dict) -> pd.DataFrame:
@@ -115,11 +110,10 @@ def extract_ids_mouse(df: pd.DataFrame, config: Dict) -> pd.DataFrame:
 
     ids = df[source_col].apply(parse_ids)
     
-    # Remove rows that have no valid identifiers (all three ID types are None)
-    # This ensures we only keep rows with at least one valid protein identifier
-    valid_rows = ids.notna().any(axis=1)
-    ids_filtered = ids[valid_rows]
-    df_filtered = df[valid_rows].drop(columns=[source_col])
+    # Don't remove rows based on missing IDs - keep all rows
+    # Just extract the IDs and keep all rows
+    ids_filtered = ids
+    df_filtered = df.drop(columns=[source_col])
     
     # Concatenate ID columns first, then other columns
     df_out = pd.concat([ids_filtered, df_filtered], axis=1)
