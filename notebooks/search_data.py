@@ -147,3 +147,26 @@ print(f"Total phosphorylation sites: {total_rows}")
 print(f"Average sites per protein: {total_rows / unique_proteins:.2f}")
 
 # %%
+# Calculate percentage of dataset with aligned phosphosites
+# Adjust the file path below as needed
+import pandas as pd
+
+aligned_data_path = "../data/processed/rat/cleaned_full_data_aligned.csv"
+
+aligned_df = pd.read_csv(aligned_data_path)
+
+# Count total number of phosphosites
+total_phosphosites = len(aligned_df)
+
+# Count phosphosites with successful alignment
+aligned_phosphosites = aligned_df['alignment_success'].sum()
+
+# Calculate percentage
+alignment_percentage = (aligned_phosphosites / total_phosphosites) * 100
+
+print(f"Total phosphosites in dataset: {total_phosphosites:,}")
+print(f"Successfully aligned phosphosites: {aligned_phosphosites:,}")
+print(f"Percentage of dataset with aligned phosphosites: {alignment_percentage:.2f}%")
+print(f"Percentage of dataset with failed alignment: {100 - alignment_percentage:.2f}%")
+
+# %%
