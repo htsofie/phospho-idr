@@ -74,7 +74,7 @@ def search_uniprot_id(file_path, target_id):
 
 if __name__ == "__main__":
     # File path and target UniProt ID
-    file_path = "../data/raw/rat/14rat_data.xls"
+    file_path = config["raw_data"]
     target_uniprot_id = "Q9R1N3"
     
     print("=" * 50)
@@ -128,7 +128,7 @@ df.loc[df[col] < 0.75, col]
 
 # %%
 # Count rows missing BOTH UniProt AND ENSEMBL values
-df = pd.read_excel("../data/raw/rat/14rat_data.xls")
+df = pd.read_excel(config["raw_data"])
 missing_both = df[['Uniprot', 'ENSEMBL']].isna().all(axis=1).sum()
 total_rows = len(df)
 
@@ -138,7 +138,7 @@ print(f"Percentage missing both: {missing_both / total_rows * 100:.2f}%")
 
 # %%
 # Count unique phosphoproteins in the Protein column
-df = pd.read_excel("../data/raw/rat/14rat_data.xls")
+df = pd.read_excel(config["raw_data"])
 unique_proteins = df['Protein'].nunique()
 total_rows = len(df)
 
@@ -151,7 +151,7 @@ print(f"Average sites per protein: {total_rows / unique_proteins:.2f}")
 # Adjust the file path below as needed
 import pandas as pd
 
-aligned_data_path = "../data/processed/rat/cleaned_full_data_aligned.csv"
+aligned_data_path = "data/processed/rat/full_total_blast_aligned.csv"
 
 aligned_df = pd.read_csv(aligned_data_path)
 
