@@ -171,21 +171,24 @@ def clean_sequence_motif(motif_seq: str, species: str) -> Tuple[str, Optional[ob
             continue
 
         if species == 'rat':
-            # Rat: site is at position 7; remove underscores and adjust for underscores before position 7
+            # Rat: site is at position 7; remove underscores, dashes and adjust for underscores before position 7
             underscores_before_7 = seq[:6].count('_')
             seq = seq.replace('_', '')
+            seq = seq.replace('-', '')
             motif_pos = 7 - underscores_before_7
         elif species == 'mouse':
-            # Mouse: '*' marks site at position 7; remove '*' and underscores, adjust for underscores before 7
+            # Mouse: '*' marks site at position 7; remove '*', underscores, and dashes, adjust for underscores before 7
             underscores_before_7 = seq[:6].count('_')
             seq = seq.replace('*', '')
             seq = seq.replace('_', '')
+            seq = seq.replace('-', '')
             motif_pos = 7 - underscores_before_7
         else:
             # Generic cleaning
             underscores_before_7 = seq[:6].count('_')
             seq = seq.replace('*', '')
             seq = seq.replace('_', '')
+            seq = seq.replace('-', '')
             motif_pos = 7 - underscores_before_7
 
         cleaned_segments.append(seq)

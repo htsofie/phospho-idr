@@ -272,27 +272,29 @@ def blast_sequence(sequence: str, db_path: str) -> List[Dict[str, Any]]:
         return []
 
 
-def check_cell_limit(ids: List[str], sequences: List[str], lengths: List[int]) -> Tuple[List[str], List[str], List[int]]:
+def check_cell_limit(ids: List[str], sequences: List[str], lengths: List[int], types: List[str]) -> Tuple[List[str], List[str], List[int], List[str]]:
     """Limit results to fit within Excel cell limits (32,767 characters)."""
     if not ids:
-        return [], [], []
+        return [], [], [], []
     
     # Try with MAX_MATCHES first
     limited_ids = ids[:MAX_MATCHES]
     limited_seqs = sequences[:MAX_MATCHES]
     limited_lengths = lengths[:MAX_MATCHES]
+    limited_types = types[:MAX_MATCHES]
     
     # Check if it fits within cell limit
     id_str = ';'.join(limited_ids)
     seq_str = ';'.join(limited_seqs)
     length_str = ';'.join(map(str, limited_lengths))
+    type_str = ';'.join(limited_types)
     
     # Find the longest string
-    max_len = max(len(id_str), len(seq_str), len(length_str))
+    max_len = max(len(id_str), len(seq_str), len(length_str), len(type_str))
     
     if max_len <= EXCEL_CELL_LIMIT:
         logger.info(f"Using {len(limited_ids)} matches (fits within cell limit)")
-        return limited_ids, limited_seqs, limited_lengths
+        return limited_ids, limited_seqs, limited_lengths, limited_types
     
     # If MAX_MATCHES doesn't fit, reduce further
     logger.warning(f"MAX_MATCHES ({MAX_MATCHES}) exceeds cell limit, reducing...")
@@ -300,20 +302,22 @@ def check_cell_limit(ids: List[str], sequences: List[str], lengths: List[int]) -
         limited_ids = ids[:i]
         limited_seqs = sequences[:i]
         limited_lengths = lengths[:i]
+        limited_types = types[:i]
         
         id_str = ';'.join(limited_ids)
         seq_str = ';'.join(limited_seqs)
         length_str = ';'.join(map(str, limited_lengths))
+        type_str = ';'.join(limited_types)
         
-        max_len = max(len(id_str), len(seq_str), len(length_str))
+        max_len = max(len(id_str), len(seq_str), len(length_str), len(type_str))
         
         if max_len <= EXCEL_CELL_LIMIT:
             logger.info(f"Using {i} matches to fit within cell limit")
-            return limited_ids, limited_seqs, limited_lengths
+            return limited_ids, limited_seqs, limited_lengths, limited_types
     
     # If even 1 doesn't fit, return empty (mark for manual review)
     logger.error("Cannot fit even 1 match within cell limit, marking for manual review")
-    return [], [], []
+    return [], [], [], []
 
 
 
@@ -350,6 +354,7 @@ def main():
     
     # Initialize new columns in the main dataframe
     df['ID_matches'] = ''
+    df['ID_types'] = ''
     df['length'] = ''
     df['full_sequence'] = ''
     df['manual_review'] = False
@@ -368,94 +373,138 @@ def main():
         group_indices = group_df.index.tolist()
         group_errors: List[str] = []
         
-        # BLAST on phosphosite sequences (ID search removed)
-        logger.info(f"Starting BLAST for group {protein_id}")
+        # BLAST all sequences in the group (one per row) - same logic as total_blast.py
+        logger.info(f"Starting BLAST for all rows in group {protein_id}")
         
-        # Get all phosphosite sequences from the group
-        phosphosite_sequences = []
-        for idx, row in group_df.iterrows():
+        # Store BLAST results for each row
+        row_blast_results = []  # List of sets of protein IDs
+        all_rows_successful = True
+        
+        for row_idx, (idx, row) in enumerate(group_df.iterrows()):
+            logger.info(f"  Processing row {row_idx + 1}/{len(group_df)}")
+            
+            # Get phosphosite sequences for this row
+            phosphosite_sequence = None
             if pd.notna(row.get('cleaned_site_motif')) and row.get('cleaned_site_motif') != '':
                 motif_str = str(row['cleaned_site_motif']).strip()
                 segments = [seg.strip() for seg in motif_str.split(';')] if ';' in motif_str else [motif_str]
-                phosphosite_sequences.extend(segments)
+                
+                # Try first sequence, then second if first fails
+                for seg_idx, seg in enumerate(segments[:2]):  # Try up to 2 sequences
+                    if len(seg) < 7:
+                        continue
+                    
+                    logger.info(f"    BLASTing sequence {seg_idx + 1}: {seg}")
+                    hits = blast_sequence(seg, db_path)
+                    
+                    if hits:
+                        logger.info(f"    Found {len(hits)} BLAST hits")
+                        # Collect protein IDs from this row's BLAST
+                        row_ids = set()
+                        for hit in hits:
+                            protein_id_hit = hit['protein_id']
+                            if protein_id_hit in database:
+                                protein_data = database[protein_id_hit]
+                                # Check species match using scientific name
+                                scientific_name = SPECIES_MAPPING.get(args.species.lower(), args.species)
+                                if scientific_name.lower() in protein_data['species'].lower():
+                                    row_ids.add(protein_id_hit)
+                        
+                        if row_ids:
+                            logger.info(f"    Row {row_idx + 1}: Found {len(row_ids)} matching IDs")
+                            row_blast_results.append(row_ids)
+                            phosphosite_sequence = seg
+                            break  # Success, don't try next sequence
+                
+                if phosphosite_sequence is None:
+                    logger.warning(f"    Row {row_idx + 1}: No valid BLAST results")
+                    all_rows_successful = False
+                    break
+            else:
+                logger.warning(f"    Row {row_idx + 1}: No cleaned_site_motif")
+                all_rows_successful = False
+                break
         
-        # Limit number of sequences to BLAST
-        if len(phosphosite_sequences) > MAX_SEQUENCES_PER_GROUP:
-            logger.warning(f"Too many sequences ({len(phosphosite_sequences)}), limiting to {MAX_SEQUENCES_PER_GROUP}")
-            phosphosite_sequences = phosphosite_sequences[:MAX_SEQUENCES_PER_GROUP]
-        
-        if not phosphosite_sequences:
-            logger.warning(f"No phosphosite sequences found for group {protein_id}")
-            group_errors.append('no_phosphosite_sequences')
+        # Find intersection of all row BLAST results (IDs that appear in ALL rows)
+        if not all_rows_successful or not row_blast_results:
+            logger.warning(f"Not all rows in group {protein_id} had successful BLAST results")
+            group_errors.append('incomplete_group_blast')
             for idx in group_indices:
                 df.at[idx, 'manual_review'] = True
                 df.at[idx, 'error_reason'] = ';'.join(group_errors)
             continue
         
-        # Try BLAST on each phosphosite sequence
-        blast_matched_ids = []
+        # Get intersection of all sets
+        common_ids = set.intersection(*row_blast_results)
+        logger.info(f"Found {len(common_ids)} IDs common to all {len(row_blast_results)} rows")
+        
+        if not common_ids:
+            logger.warning(f"No common IDs found across all rows in group {protein_id}")
+            
+            # Fallback: Find ID with most matches across all rows
+            all_ids = set()
+            for row_ids in row_blast_results:
+                all_ids.update(row_ids)
+            
+            if all_ids:
+                # Count occurrences of each ID across all rows
+                id_counts = {}
+                for row_ids in row_blast_results:
+                    for protein_id_hit in row_ids:
+                        id_counts[protein_id_hit] = id_counts.get(protein_id_hit, 0) + 1
+                
+                # Find ID with maximum count
+                best_id = max(id_counts, key=id_counts.get)
+                max_count = id_counts[best_id]
+                
+                logger.info(f"Fallback: Using ID {best_id} found in {max_count}/{len(row_blast_results)} rows")
+                common_ids = {best_id}
+                group_errors.append('no_common_blast_ids_used_fallback')
+            else:
+                group_errors.append('no_common_blast_ids')
+                for idx in group_indices:
+                    df.at[idx, 'manual_review'] = True
+                    df.at[idx, 'error_reason'] = ';'.join(group_errors)
+                continue
+        
+        # Convert to lists and get sequences
+        blast_matched_ids = list(common_ids)
         blast_matched_sequences = []
         blast_matched_lengths = []
+        blast_matched_types = []
         
-        for seq in phosphosite_sequences:
-            if len(seq) < 7:  # Skip too short sequences
-                continue
-                
-            logger.info(f"BLASTing sequence: {seq}")
-            hits = blast_sequence(seq, db_path)
-            
-            if hits:
-                logger.info(f"Found {len(hits)} BLAST hits for sequence {seq}")
-                # Filter hits by species and get sequences from database
-                # Get scientific name for species matching
-                scientific_name = SPECIES_MAPPING.get(args.species.lower(), args.species)
-                for hit in hits:
-                    protein_id_hit = hit['protein_id']
-                    logger.info(f"  Checking BLAST hit: {protein_id_hit}")
-                    if protein_id_hit in database:
-                        protein_data = database[protein_id_hit]
-                        logger.info(f"    Found in database, species: {protein_data['species']}")
-                        # Check species match using scientific name
-                        if scientific_name.lower() in protein_data['species'].lower():
-                            logger.info(f"    Species match! Adding {protein_id_hit}")
-                            if protein_id_hit not in blast_matched_ids:
-                                blast_matched_ids.append(protein_id_hit)
-                                blast_matched_sequences.append(protein_data['sequence'])
-                                blast_matched_lengths.append(protein_data['length'])
-                        else:
-                            logger.info(f"    Species mismatch: expected {scientific_name}, got {protein_data['species']}")
-                    else:
-                        logger.info(f"    {protein_id_hit} not found in database")
-                
-                if blast_matched_ids:
-                    logger.info(f"Found {len(blast_matched_ids)} BLAST matches, stopping search")
-                    break  # Found matches, no need to try other sequences
+        for protein_id_hit in blast_matched_ids:
+            protein_data = database[protein_id_hit]
+            blast_matched_sequences.append(protein_data['sequence'])
+            blast_matched_lengths.append(protein_data['length'])
+            # Map db_type to sp/tr format
+            id_type = 'sp' if protein_data['db_type'] == 'swissprot' else 'tr'
+            blast_matched_types.append(id_type)
         
         if blast_matched_ids:
             logger.info(f"Found {len(blast_matched_ids)} BLAST matches")
             # Apply cell limit and top 10 restriction
-            limited_ids, limited_seqs, limited_lengths = check_cell_limit(blast_matched_ids, blast_matched_sequences, blast_matched_lengths)
+            limited_ids, limited_seqs, limited_lengths, limited_types = check_cell_limit(blast_matched_ids, blast_matched_sequences, blast_matched_lengths, blast_matched_types)
             
             if limited_ids:
                 # Update all rows in the group
                 for idx in group_indices:
                     df.at[idx, 'ID_matches'] = ';'.join(limited_ids)
+                    df.at[idx, 'ID_types'] = ';'.join(limited_types)
                     df.at[idx, 'length'] = ';'.join(map(str, limited_lengths))
                     df.at[idx, 'full_sequence'] = ';'.join(limited_seqs)
                     df.at[idx, 'manual_review'] = False
                     df.at[idx, 'match_method'] = 'blast'
             else:
-                # If even limited results don't fit, flag for review
-                logger.warning(f"BLAST results exceed cell limit, flagging for manual review")
+                # If even limited results don't fit, keep manual review flag
+                logger.warning(f"BLAST results exceed cell limit")
                 group_errors.append('exceeds_excel_cell_limit_blast')
                 for idx in group_indices:
-                    df.at[idx, 'manual_review'] = True
                     df.at[idx, 'error_reason'] = ';'.join(group_errors)
         else:
             logger.warning(f"No BLAST matches found for group {protein_id}")
             group_errors.append('no_exact_blast_match')
             for idx in group_indices:
-                df.at[idx, 'manual_review'] = True
                 df.at[idx, 'error_reason'] = ';'.join(group_errors)
     
     # Use the updated dataframe

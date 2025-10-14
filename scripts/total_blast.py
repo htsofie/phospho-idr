@@ -40,6 +40,13 @@ MAX_IDS_PER_GROUP = 50
 # Maximum number of sequences to BLAST per group
 MAX_SEQUENCES_PER_GROUP = 20
 
+# Species name mapping (common name -> scientific name)
+SPECIES_MAPPING = {
+    'mouse': 'Mus musculus',
+    'rat': 'Rattus norvegicus',
+    'human': 'Homo sapiens'
+}
+
 
 def load_full_database(species: str) -> Dict[str, Dict[str, Any]]:
     """Load the full UniProtKB species database FASTA file and parse into dictionary."""
@@ -274,27 +281,29 @@ def blast_sequence(sequence: str, db_path: str) -> List[Dict[str, Any]]:
         return []
 
 
-def check_cell_limit(ids: List[str], sequences: List[str], lengths: List[int]) -> Tuple[List[str], List[str], List[int]]:
+def check_cell_limit(ids: List[str], sequences: List[str], lengths: List[int], types: List[str]) -> Tuple[List[str], List[str], List[int], List[str]]:
     """Limit results to fit within Excel cell limits (32,767 characters)."""
     if not ids:
-        return [], [], []
+        return [], [], [], []
     
     # Try with MAX_MATCHES first
     limited_ids = ids[:MAX_MATCHES]
     limited_seqs = sequences[:MAX_MATCHES]
     limited_lengths = lengths[:MAX_MATCHES]
+    limited_types = types[:MAX_MATCHES]
     
     # Check if it fits within cell limit
     id_str = ';'.join(limited_ids)
     seq_str = ';'.join(limited_seqs)
     length_str = ';'.join(map(str, limited_lengths))
+    type_str = ';'.join(limited_types)
     
     # Find the longest string
-    max_len = max(len(id_str), len(seq_str), len(length_str))
+    max_len = max(len(id_str), len(seq_str), len(length_str), len(type_str))
     
     if max_len <= EXCEL_CELL_LIMIT:
         logger.info(f"Using {len(limited_ids)} matches (fits within cell limit)")
-        return limited_ids, limited_seqs, limited_lengths
+        return limited_ids, limited_seqs, limited_lengths, limited_types
     
     # If MAX_MATCHES doesn't fit, reduce further
     logger.warning(f"MAX_MATCHES ({MAX_MATCHES}) exceeds cell limit, reducing...")
@@ -302,20 +311,22 @@ def check_cell_limit(ids: List[str], sequences: List[str], lengths: List[int]) -
         limited_ids = ids[:i]
         limited_seqs = sequences[:i]
         limited_lengths = lengths[:i]
+        limited_types = types[:i]
         
         id_str = ';'.join(limited_ids)
         seq_str = ';'.join(limited_seqs)
         length_str = ';'.join(map(str, limited_lengths))
+        type_str = ';'.join(limited_types)
         
-        max_len = max(len(id_str), len(seq_str), len(length_str))
+        max_len = max(len(id_str), len(seq_str), len(length_str), len(type_str))
         
         if max_len <= EXCEL_CELL_LIMIT:
             logger.info(f"Using {i} matches to fit within cell limit")
-            return limited_ids, limited_seqs, limited_lengths
+            return limited_ids, limited_seqs, limited_lengths, limited_types
     
     # If even 1 doesn't fit, return empty (mark for manual review)
     logger.error("Cannot fit even 1 match within cell limit, marking for manual review")
-    return [], [], []
+    return [], [], [], []
 
 
 
@@ -413,8 +424,9 @@ def main():
                             protein_id_hit = hit['protein_id']
                             if protein_id_hit in database:
                                 protein_data = database[protein_id_hit]
-                                # Check species match
-                                if args.species.lower() in protein_data['species'].lower():
+                                # Check species match using scientific name
+                                scientific_name = SPECIES_MAPPING.get(args.species.lower(), args.species)
+                                if scientific_name.lower() in protein_data['species'].lower():
                                     row_ids.add(protein_id_hit)
                         
                         if row_ids:
@@ -446,34 +458,61 @@ def main():
         
         if not common_ids:
             logger.warning(f"No common IDs found across all rows in group {protein_id}")
-            group_errors.append('no_common_blast_ids')
-            for idx in group_indices:
-                df.at[idx, 'error_reason'] = ';'.join(group_errors)
-            continue
+            
+            # Fallback: Find ID with most matches across all rows
+            all_ids = set()
+            for row_ids in row_blast_results:
+                all_ids.update(row_ids)
+            
+            if all_ids:
+                # Count occurrences of each ID across all rows
+                id_counts = {}
+                for row_ids in row_blast_results:
+                    for protein_id_hit in row_ids:
+                        id_counts[protein_id_hit] = id_counts.get(protein_id_hit, 0) + 1
+                
+                # Find ID with maximum count
+                best_id = max(id_counts, key=id_counts.get)
+                max_count = id_counts[best_id]
+                
+                logger.info(f"Fallback: Using ID {best_id} found in {max_count}/{len(row_blast_results)} rows")
+                common_ids = {best_id}
+                group_errors.append('no_common_blast_ids_used_fallback')
+            else:
+                group_errors.append('no_common_blast_ids')
+                for idx in group_indices:
+                    df.at[idx, 'error_reason'] = ';'.join(group_errors)
+                continue
         
         # Convert to lists and get sequences
         blast_matched_ids = list(common_ids)
         blast_matched_sequences = []
         blast_matched_lengths = []
+        blast_matched_types = []
         
         for protein_id_hit in blast_matched_ids:
             protein_data = database[protein_id_hit]
             blast_matched_sequences.append(protein_data['sequence'])
             blast_matched_lengths.append(protein_data['length'])
+            # Map db_type to sp/tr format
+            id_type = 'sp' if protein_data['db_type'] == 'swissprot' else 'tr'
+            blast_matched_types.append(id_type)
         
         if blast_matched_ids:
             logger.info(f"Found {len(blast_matched_ids)} BLAST matches")
             # Apply cell limit and top 10 restriction
-            limited_ids, limited_seqs, limited_lengths = check_cell_limit(blast_matched_ids, blast_matched_sequences, blast_matched_lengths)
+            limited_ids, limited_seqs, limited_lengths, limited_types = check_cell_limit(blast_matched_ids, blast_matched_sequences, blast_matched_lengths, blast_matched_types)
             
             if limited_ids:
                 # Update all rows in the group
                 for idx in group_indices:
                     df.at[idx, 'ID_matches'] = ';'.join(limited_ids)
+                    df.at[idx, 'ID_types'] = ';'.join(limited_types)
                     df.at[idx, 'length'] = ';'.join(map(str, limited_lengths))
                     df.at[idx, 'full_sequence'] = ';'.join(limited_seqs)
                     df.at[idx, 'manual_review'] = False
                     df.at[idx, 'match_method'] = 'total_blast'
+                    df.at[idx, 'error_reason'] = ''  # Clear any previous errors
             else:
                 # If even limited results don't fit, keep manual review flag
                 logger.warning(f"BLAST results exceed cell limit")

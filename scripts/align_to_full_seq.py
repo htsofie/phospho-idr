@@ -193,6 +193,7 @@ def process_alignment_row(row: pd.Series, try_all_candidates: bool = True) -> Di
     # Get data - handle multiple candidate sequences
     protein_seq_str = str(row['full_sequence']).strip()
     id_matches_str = str(row.get('ID_matches', '')).strip()
+    id_types_str = str(row.get('ID_types', '')).strip()
     
     # Check if this is multiple candidate sequences (semicolon-separated)
     if ';' in protein_seq_str and row.get('sequence_type') == 'NAME_MAPPED_MULTIPLE':
@@ -203,10 +204,11 @@ def process_alignment_row(row: pd.Series, try_all_candidates: bool = True) -> Di
         # Split into candidates
         candidate_sequences = [seq.strip() for seq in protein_seq_str.split(';') if seq.strip()]
         candidate_ids = [id.strip() for id in id_matches_str.split(';') if id.strip()]
+        candidate_types = [t.strip() for t in id_types_str.split(';') if t.strip()] if id_types_str else ['tr'] * len(candidate_ids)
         
         if len(candidate_sequences) > 1 and len(candidate_sequences) == len(candidate_ids):
             # Try all candidates and find the best one
-            return process_row_with_multiple_candidates(row, candidate_sequences, candidate_ids, is_blast_mapped)
+            return process_row_with_multiple_candidates(row, candidate_sequences, candidate_ids, candidate_types, is_blast_mapped)
     
     # Single sequence processing (original logic)
     protein_seq = protein_seq_str.split(';')[0].strip() if ';' in protein_seq_str else protein_seq_str
@@ -259,11 +261,6 @@ def process_alignment_row(row: pd.Series, try_all_candidates: bool = True) -> Di
     if expected_position and best_result.get("aligned_position"):
         position_difference = abs(expected_position - best_result["aligned_position"])
     
-    # Check position difference threshold (150 for regular, 1000 for BLAST-mapped)
-    max_position_diff = 1000 if is_blast_mapped else 150
-    if position_difference > max_position_diff:
-        return {"alignment_success": False, "alignment_error": f"Position difference too large: {position_difference} (maximum {max_position_diff})"}
-    
     # Success - return all alignment data
     result = {"alignment_success": True}
     result.update(best_result)
@@ -273,7 +270,7 @@ def process_alignment_row(row: pd.Series, try_all_candidates: bool = True) -> Di
 
 
 def process_row_with_multiple_candidates(row: pd.Series, candidate_sequences: List[str], 
-                                         candidate_ids: List[str], is_blast_mapped: bool) -> Dict[str, Any]:
+                                         candidate_ids: List[str], candidate_types: List[str], is_blast_mapped: bool) -> Dict[str, Any]:
     """Try all candidate IDs/sequences and return the best alignment."""
     print(f"    Trying {len(candidate_sequences)} candidate IDs/sequences for best alignment...")
     
@@ -288,15 +285,15 @@ def process_row_with_multiple_candidates(row: pd.Series, candidate_sequences: Li
     position_segments = position_segments[:num_to_try]
     
     expected_position = int(row['position']) if not pd.isna(row.get('position')) and row.get('position') else None
-    max_position_diff = 1000 if is_blast_mapped else 150
     
     best_candidate_result = None
     best_candidate_id = None
     best_candidate_seq = None
+    best_candidate_type = None
     best_score = -1
     
     # Try each candidate
-    for cand_idx, (protein_seq, cand_id) in enumerate(zip(candidate_sequences, candidate_ids)):
+    for cand_idx, (protein_seq, cand_id, cand_type) in enumerate(zip(candidate_sequences, candidate_ids, candidate_types)):
         best_result_for_candidate: Optional[Dict[str, Any]] = None
         best_identity_for_candidate: float = -1.0
         
@@ -332,28 +329,24 @@ def process_row_with_multiple_candidates(row: pd.Series, candidate_sequences: Li
             if expected_position and best_result_for_candidate.get("aligned_position"):
                 position_difference = abs(expected_position - best_result_for_candidate["aligned_position"])
             
-            # Check position difference threshold
-            if position_difference > max_position_diff:
-                print(f"      Candidate {cand_idx + 1} ({cand_id}): Position diff too large ({position_difference} > {max_position_diff})")
-                continue
+            # Calculate score: prioritize sp over tr, then position_diff, then identity
+            # Score formula: ID type bonus + (10000 - position_diff) + identity
+            score = (5000 if cand_type == 'sp' else 0) + (10000 - position_difference) + best_identity_for_candidate
             
-            # Calculate score: prioritize smaller position difference, then higher identity
-            # Score formula: 10000 - position_diff + identity (so lower pos_diff is better)
-            score = 10000 - position_difference + best_identity_for_candidate
-            
-            print(f"      Candidate {cand_idx + 1} ({cand_id}): Valid - identity {best_identity_for_candidate:.1f}%, pos_diff {position_difference}, score {score:.1f}")
+            print(f"      Candidate {cand_idx + 1} ({cand_id}, {cand_type}): Valid - identity {best_identity_for_candidate:.1f}%, pos_diff {position_difference}, score {score:.1f}")
             
             if score > best_score:
                 best_score = score
                 best_candidate_result = best_result_for_candidate
                 best_candidate_id = cand_id
                 best_candidate_seq = protein_seq
+                best_candidate_type = cand_type
                 best_candidate_result["position_difference"] = position_difference
     
     # Return best candidate
     if best_candidate_result:
-        print(f"      → Selected candidate: {best_candidate_id}")
-        result = {"alignment_success": True, "selected_id": best_candidate_id, "selected_sequence": best_candidate_seq}
+        print(f"      → Selected candidate: {best_candidate_id} ({best_candidate_type})")
+        result = {"alignment_success": True, "selected_id": best_candidate_id, "selected_sequence": best_candidate_seq, "selected_id_type": best_candidate_type}
         result.update(best_candidate_result)
         return result
     else:
@@ -366,9 +359,11 @@ def process_multiple_candidate_sequences(row: pd.Series) -> Dict[str, Any]:
     # Get all candidate sequences and IDs
     protein_seq_str = str(row['full_sequence']).strip()
     uniprot_ids_str = str(row.get('uniprot_mapped_id', '')).strip()
+    id_types_str = str(row.get('ID_types', '')).strip()
     
     candidate_sequences = [seq.strip() for seq in protein_seq_str.split(';') if seq.strip()]
     candidate_ids = [id.strip() for id in uniprot_ids_str.split(';') if id.strip()]
+    candidate_types = [t.strip() for t in id_types_str.split(';') if t.strip()] if id_types_str else ['tr'] * len(candidate_ids)
     
     if not candidate_sequences:
         return {"alignment_success": False, "alignment_error": "No candidate sequences found"}
@@ -394,18 +389,19 @@ def process_multiple_candidate_sequences(row: pd.Series) -> Dict[str, Any]:
     best_overall_result = None
     best_overall_score = -1
     best_candidate_id = None
+    best_candidate_type = None
     
-    for i, (candidate_seq, candidate_id) in enumerate(zip(candidate_sequences, candidate_ids)):
-        print(f"  Trying candidate {i+1}/{len(candidate_sequences)}: {candidate_id}")
+    for i, (candidate_seq, candidate_id, candidate_type) in enumerate(zip(candidate_sequences, candidate_ids, candidate_types)):
+        print(f"  Trying candidate {i+1}/{len(candidate_sequences)}: {candidate_id} ({candidate_type})")
         
         # Test alignment for this candidate
         candidate_result = test_candidate_alignment(
-            candidate_seq, peptide_segments, position_segments, expected_position
+            candidate_seq, peptide_segments, position_segments, expected_position, candidate_type
         )
         
         if candidate_result:
             # Score this candidate: prioritize exact matches with 0 position difference
-            score = calculate_candidate_score(candidate_result, expected_position)
+            score = calculate_candidate_score(candidate_result, expected_position, candidate_type)
             
             print(f"    Score: {score:.1f} (identity: {candidate_result.get('identity', 0):.1f}%, "
                   f"position_diff: {candidate_result.get('position_difference', 999)})")
@@ -414,6 +410,7 @@ def process_multiple_candidate_sequences(row: pd.Series) -> Dict[str, Any]:
                 best_overall_score = score
                 best_overall_result = candidate_result
                 best_candidate_id = candidate_id
+                best_candidate_type = candidate_type
     
     if not best_overall_result:
         return {"alignment_success": False, "alignment_error": "No valid alignment found for any candidate"}
@@ -429,13 +426,15 @@ def process_multiple_candidate_sequences(row: pd.Series) -> Dict[str, Any]:
         except Exception:
             row['sequence_length'] = None
         row['sequence_type'] = 'NAME_MAPPED_BEST'
-        print(f"  Selected best candidate: {best_candidate_id}")
+        print(f"  Selected best candidate: {best_candidate_id} ({best_candidate_type})")
     
+    # Add selected ID type to the result
+    best_overall_result['selected_id_type'] = best_candidate_type
     return best_overall_result
 
 
 def test_candidate_alignment(protein_seq: str, peptide_segments: List[str], 
-                           position_segments: List[str], expected_position: Optional[int]) -> Optional[Dict[str, Any]]:
+                           position_segments: List[str], expected_position: Optional[int], id_type: str = 'tr') -> Optional[Dict[str, Any]]:
     """Test alignment for a single candidate sequence."""
     num_to_try = min(len(peptide_segments), len(position_segments))
     peptide_segments = peptide_segments[:num_to_try]
@@ -478,10 +477,6 @@ def test_candidate_alignment(protein_seq: str, peptide_segments: List[str],
     if expected_position and best_result.get("aligned_position"):
         position_difference = abs(expected_position - best_result["aligned_position"])
     
-    # Check position difference threshold (150)
-    if position_difference > 150:
-        return None
-    
     # Success - return all alignment data
     result = {"alignment_success": True}
     result.update(best_result)
@@ -490,9 +485,13 @@ def test_candidate_alignment(protein_seq: str, peptide_segments: List[str],
     return result
 
 
-def calculate_candidate_score(result: Dict[str, Any], expected_position: Optional[int]) -> float:
+def calculate_candidate_score(result: Dict[str, Any], expected_position: Optional[int], id_type: str = 'tr') -> float:
     """Calculate a score for a candidate alignment result."""
     score = 0.0
+    
+    # Massive bonus for SwissProt IDs (prioritizes sp over tr)
+    if id_type == 'sp':
+        score += 5000
     
     # Base score from identity
     identity = result.get("identity", 0.0)
@@ -502,14 +501,13 @@ def calculate_candidate_score(result: Dict[str, Any], expected_position: Optiona
     if result.get("match_type") == "exact":
         score += 50.0
     
-    # Bonus for 0 position difference (exact position match)
+    # Use position_diff as tie-breaker (smaller is better)
     position_diff = result.get("position_difference", 999)
     if position_diff == 0:
         score += 100.0
-    elif position_diff <= 10:
-        score += 50.0
-    elif position_diff <= 50:
-        score += 25.0
+    else:
+        # Subtract position_diff to prefer smaller differences
+        score -= position_diff * 0.1  # Scale factor to not dominate other criteria
     
     return score
 
@@ -521,9 +519,11 @@ def process_protein_group_with_candidates(group_df: pd.DataFrame, main_df: pd.Da
     # Get all candidate sequences and IDs
     protein_seq_str = str(first_row['full_sequence']).strip()
     uniprot_ids_str = str(first_row.get('uniprot_mapped_id', '')).strip()
+    id_types_str = str(first_row.get('ID_types', '')).strip()
     
     candidate_sequences = [seq.strip() for seq in protein_seq_str.split(';') if seq.strip()]
     candidate_ids = [id.strip() for id in uniprot_ids_str.split(';') if id.strip()]
+    candidate_types = [t.strip() for t in id_types_str.split(';') if t.strip()] if id_types_str else ['tr'] * len(candidate_ids)
     
     if not candidate_sequences:
         # Return failure for all rows
@@ -536,11 +536,12 @@ def process_protein_group_with_candidates(group_df: pd.DataFrame, main_df: pd.Da
     
     # Evaluate each candidate against ALL phosphosites in the group
     best_candidate_id = None
+    best_candidate_type = None
     best_candidate_score = -1
     best_candidate_results = {}
     
-    for i, (candidate_seq, candidate_id) in enumerate(zip(candidate_sequences, candidate_ids)):
-        print(f"  Testing candidate {i+1}/{len(candidate_sequences)}: {candidate_id}")
+    for i, (candidate_seq, candidate_id, candidate_type) in enumerate(zip(candidate_sequences, candidate_ids, candidate_types)):
+        print(f"  Testing candidate {i+1}/{len(candidate_sequences)}: {candidate_id} ({candidate_type})")
         
         # Test this candidate against all phosphosites in the group
         candidate_results = {}
@@ -558,12 +559,12 @@ def process_protein_group_with_candidates(group_df: pd.DataFrame, main_df: pd.Da
             
             # Test alignment for this candidate and this phosphosite
             result = test_candidate_alignment(
-                candidate_seq, peptide_segments, position_segments, expected_position
+                candidate_seq, peptide_segments, position_segments, expected_position, candidate_type
             )
             
             if result:
                 candidate_results[idx] = result
-                score = calculate_candidate_score(result, expected_position)
+                score = calculate_candidate_score(result, expected_position, candidate_type)
                 candidate_scores.append(score)
             else:
                 all_successful = False
@@ -584,6 +585,7 @@ def process_protein_group_with_candidates(group_df: pd.DataFrame, main_df: pd.Da
             if group_score > best_candidate_score:
                 best_candidate_score = group_score
                 best_candidate_id = candidate_id
+                best_candidate_type = candidate_type
                 best_candidate_results = candidate_results.copy()
                 print(f"    → New best candidate!")
     
@@ -609,8 +611,9 @@ def process_protein_group_with_candidates(group_df: pd.DataFrame, main_df: pd.Da
         main_df.at[idx, 'full_sequence'] = best_candidate_seq
         main_df.at[idx, 'sequence_length'] = best_seq_len
         main_df.at[idx, 'sequence_type'] = 'NAME_MAPPED_BEST'
+        main_df.at[idx, 'ID_types'] = best_candidate_type
     
-    print(f"  Selected best candidate: {best_candidate_id} (score: {best_candidate_score:.1f})")
+    print(f"  Selected best candidate: {best_candidate_id} ({best_candidate_type}) (score: {best_candidate_score:.1f})")
     print(f"  Updated {len(group_indices)} rows in the group with best candidate")
     
     return best_candidate_results
@@ -677,11 +680,13 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
                     df.at[idx, 'ID_matches'] = alignment_result['selected_id']
                     df.at[idx, 'full_sequence'] = alignment_result['selected_sequence']
                     df.at[idx, 'length'] = len(alignment_result['selected_sequence'])
-                    print(f"    → Updated to use best candidate: {alignment_result['selected_id']}")
+                    if alignment_result.get('selected_id_type'):
+                        df.at[idx, 'ID_types'] = alignment_result['selected_id_type']
+                    print(f"    → Updated to use best candidate: {alignment_result['selected_id']} ({alignment_result.get('selected_id_type', 'unknown')})")
                 
                 # Store alignment results
                 for key, value in alignment_result.items():
-                    if key not in ['selected_id', 'selected_sequence']:  # Don't store these as columns
+                    if key not in ['selected_id', 'selected_sequence', 'selected_id_type']:  # Don't store these as columns
                         df.at[idx, key] = value
                 
                 if alignment_result.get('alignment_success', False):
