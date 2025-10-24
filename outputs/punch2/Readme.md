@@ -130,3 +130,9 @@ Q68HB5
 
 missing rat proteins job number (79):
 5d3ebd73-e517-4c61-889d-e8e7fb3e48fe
+
+# Results analysis
+
+From punch2 downloaded data:
+values greater than 0.35 score = disordered (represented by binary 1)
+values less than 0.35 socre = ordered (represented by binary 0)
