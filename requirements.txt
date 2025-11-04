@@ -1,5 +1,6 @@
-# PHOSPHORYLATION PROJECT - UPDATED REQUIREMENTS
-# Updated for Python 3.13 compatibility and cross-platform support
+# PHOSPHORYLATION PROJECT - CROSS-PLATFORM REQUIREMENTS
+# Updated for Python 3.8+ compatibility and cross-platform support (Linux & macOS)
+# Run setup_environment.sh (Linux) or setup_macos.sh (macOS) to install
 
 # CORE DATA SCIENCE STACK
 pandas>=2.2.0
