@@ -7,7 +7,8 @@ This script searches for protein ID matches between:
 - An interface CSV file (searches P1 and P2 columns)
 
 When matches are found, it creates a new CSV with interface data
-and adds a 'matched_id' column indicating which column (P1 or P2) matched.
+and adds 'P1_ID_match' and 'P2_ID_match' columns indicating which protein IDs matched.
+Both columns can have values in the same row if both P1 and P2 match.
 
 Usage:
     python protein_interface_matcher.py <disorder_file> <interface_file> <output_file>
@@ -85,20 +86,22 @@ def find_protein_interface_matches(disorder_file, interface_file, output_file):
     for idx, row in df_interface.iterrows():
         p1_id = row['P1']
         p2_id = row['P2']
-        matched_id = None
+        p1_match = None
+        p2_match = None
         
-        # Check P1 column
+        # Check P1 column independently
         if p1_id in unique_protein_ids:
-            matched_id = p1_id
+            p1_match = p1_id
             
-        # Check P2 column (if P1 didn't match)
-        elif p2_id in unique_protein_ids:
-            matched_id = p2_id
+        # Check P2 column independently
+        if p2_id in unique_protein_ids:
+            p2_match = p2_id
         
-        # If we found a match, add to results
-        if matched_id:
+        # If we found at least one match, add to results
+        if p1_match or p2_match:
             match_row = row.copy()
-            match_row['matched_id'] = matched_id
+            match_row['P1_ID_match'] = p1_match if p1_match else None
+            match_row['P2_ID_match'] = p2_match if p2_match else None
             matches.append(match_row)
     
     if not matches:
@@ -110,15 +113,21 @@ def find_protein_interface_matches(disorder_file, interface_file, output_file):
     print(f"Found {len(df_matches)} interface matches")
     
     # Count matches by column
-    p1_matches = len(df_matches[df_matches['matched_id'] == df_matches['P1']])
-    p2_matches = len(df_matches[df_matches['matched_id'] == df_matches['P2']])
+    p1_matches = df_matches['P1_ID_match'].notna().sum()
+    p2_matches = df_matches['P2_ID_match'].notna().sum()
+    both_matches = df_matches[(df_matches['P1_ID_match'].notna()) & (df_matches['P2_ID_match'].notna())].shape[0]
     
     print(f"Matches in P1 column: {p1_matches}")
     print(f"Matches in P2 column: {p2_matches}")
+    print(f"Rows where both P1 and P2 match: {both_matches}")
     
     # Show unique matched proteins
-    unique_matched_proteins = df_matches['matched_id'].nunique()
-    print(f"Unique proteins with interface data: {unique_matched_proteins}")
+    p1_unique = df_matches['P1_ID_match'].dropna().nunique()
+    p2_unique = df_matches['P2_ID_match'].dropna().nunique()
+    all_matched_ids = set(df_matches['P1_ID_match'].dropna().unique()) | set(df_matches['P2_ID_match'].dropna().unique())
+    print(f"Unique proteins with P1 match: {p1_unique}")
+    print(f"Unique proteins with P2 match: {p2_unique}")
+    print(f"Total unique proteins with interface data: {len(all_matched_ids)}")
     
     # Save results
     print(f"\nSaving results to: {output_file}")
@@ -131,7 +140,7 @@ def find_protein_interface_matches(disorder_file, interface_file, output_file):
     
     # Show sample of results
     print(f"\nSample of matches:")
-    print(df_matches[['P1', 'P2', 'Source', 'matched_id']].head(10).to_string(index=False))
+    print(df_matches[['P1', 'P2', 'Source', 'P1_ID_match', 'P2_ID_match']].head(10).to_string(index=False))
     
     return True
 
