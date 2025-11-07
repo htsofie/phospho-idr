@@ -2,9 +2,8 @@
 data/PPint/interface_data.csv
 data/blast_dbs/uniprotkb_taxonomy_id_9606_2025_11_04.fasta
 
-# Other large fasta files
-*.fasta
-!data/blast_dbs/*.fasta
+#blast database files
+data/blast_dbs/*
 
 # BLAST database files
 *.phr
@@ -15,6 +14,4 @@ data/blast_dbs/uniprotkb_taxonomy_id_9606_2025_11_04.fasta
 *.pto
 *.pdb
 
-# Large CSV files (over 50MB)
-# Add specific large files here as needed
 
