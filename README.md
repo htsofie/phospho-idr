@@ -22,12 +22,11 @@ This project processes phosphorylation site data from multiple species, performi
 git clone https://github.com/htsofie/phospho-idr
 cd phospho_root
 
-# Create and activate virtual environment
-python3 -m venv lab_env
-source lab_env/bin/activate  # On Windows: lab_env\Scripts\activate
+# Run setup script (works on both Mac and Linux)
+bash setup.sh
 
-# Install dependencies
-pip install -r requirements.txt
+# After setup, activate the environment
+source lab_env/bin/activate
 ```
 
 ### Basic Usage

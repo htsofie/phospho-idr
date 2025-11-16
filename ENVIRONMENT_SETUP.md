@@ -1,64 +1,80 @@
 # Phospho Analysis Project - Environment Setup
 
-This project supports both Linux and macOS environments. Follow the appropriate setup instructions below.
+This project supports both Linux and macOS environments with a single unified setup script.
 
 ## Quick Setup
 
-### For Linux (Ubuntu/Debian):
+### For All Platforms (Linux & macOS):
 ```bash
-./setup_environment.sh
+bash setup.sh
 ```
 
-### For macOS:
+That's it! The script will:
+1. Check for Python 3.8+
+2. Create a virtual environment (`lab_env`)
+3. Install all required packages
+4. Register the Jupyter kernel
+
+## Manual Setup (Alternative)
+
+If you prefer to set up manually:
+
 ```bash
-./setup_macos.sh
+# Create virtual environment
+python3 -m venv lab_env
+
+# Activate virtual environment
+source lab_env/bin/activate  # On Windows: lab_env\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Register Jupyter kernel
+python -m ipykernel install --user --name=lab_env --display-name="Python (lab_env)"
 ```
 
-## Manual Setup
+## Using the Environment
 
-If you prefer to set up manually or the scripts don't work:
+After setup:
 
-### Linux Setup:
-1. Ensure Python 3.8+ is installed
-2. Install packages: `pip3 install --break-system-packages -r requirements.txt`
-3. Register kernel: `python3 -m ipykernel install --user --name=phospho_env --display-name="Phospho Analysis Environment"`
+```bash
+# Activate the environment
+source lab_env/bin/activate
 
-### macOS Setup:
-1. Install Homebrew if not already installed
-2. Install Python 3: `brew install python3`
-3. Install packages: `pip3 install --user -r requirements.txt`
-4. Register kernel: `python3 -m ipykernel install --user --name=phospho_env --display-name="Phospho Analysis Environment"`
+# Start Jupyter Lab
+jupyter lab
 
-## Using Jupyter Notebooks
+# Or start Jupyter Notebook
+jupyter notebook
+```
 
-After setup, you can start Jupyter in several ways:
-
-1. **Jupyter Lab** (recommended): `jupyter lab`
-2. **Jupyter Notebook**: `jupyter notebook`
-3. **VS Code**: Open `.ipynb` files and select the "Phospho Analysis Environment" kernel
+In your notebooks, select the **"Python (lab_env)"** kernel.
 
 ## Environment Details
 
-- **Python Version**: 3.8+ (tested on 3.12)
+- **Python Version**: 3.8+ (tested on 3.13)
+- **Virtual Environment**: `lab_env/` (created in project root)
 - **Key Packages**: pandas, numpy, matplotlib, seaborn, biopython, jupyter
-- **Kernel Name**: "Phospho Analysis Environment"
-- **Cross-Platform**: Linux (Ubuntu/Debian) and macOS
+- **Kernel Name**: "Python (lab_env)"
+- **Cross-Platform**: Linux and macOS
 
 ## Troubleshooting
 
-### Linux Issues:
-- If you get "externally-managed-environment" error, use `--break-system-packages` flag
-- If pip is not available, install: `sudo apt install python3-pip`
+### Python Not Found:
+- **Linux**: `sudo apt install python3`
+- **macOS**: `brew install python3`
 
-### macOS Issues:
-- If Homebrew is not installed, install it first
-- If Python 3 is not available, install via Homebrew: `brew install python3`
-- If you get permission errors, use `--user` flag with pip
+### Virtual Environment Issues:
+- If `lab_env` is corrupted, delete it and rerun `bash setup.sh`
+- Make sure you're using `source lab_env/bin/activate` (not just `lab_env/bin/activate`)
 
-### General Issues:
-- Ensure Python 3.8+ is installed
-- Check that all packages imported successfully
+### Package Installation Issues:
+- Ensure you have internet connection
+- Try upgrading pip first: `lab_env/bin/pip install --upgrade pip`
+
+### Jupyter Kernel Not Found:
 - Verify kernel is registered: `jupyter kernelspec list`
+- Re-register: `lab_env/bin/python -m ipykernel install --user --name=lab_env`
 
 ## Project Structure
 
@@ -69,7 +85,6 @@ phospho_root/
 ├── data/               # Data files (raw and processed)
 ├── configs/            # Configuration files
 ├── requirements.txt    # Python package requirements
-├── setup_environment.sh  # Linux setup script
-├── setup_macos.sh     # macOS setup script
-└── README.md          # This file
+├── setup.sh           # Unified setup script (Mac & Linux)
+└── README.md          # Main project documentation
 ```

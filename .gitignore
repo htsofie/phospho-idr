@@ -14,4 +14,7 @@ data/blast_dbs/*
 *.pto
 *.pdb
 
+# Virtual environment
+lab_env/
+
 
