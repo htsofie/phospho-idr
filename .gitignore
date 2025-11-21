@@ -17,4 +17,7 @@ data/blast_dbs/*
 # Virtual environment
 lab_env/
 
+# macOS system files
+.DS_Store
+**/.DS_Store
 
