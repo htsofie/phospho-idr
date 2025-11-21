@@ -21,3 +21,7 @@ lab_env/
 .DS_Store
 **/.DS_Store
 
+# Lock files
+*.~lock
+**/*.~lock
+
