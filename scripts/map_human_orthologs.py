@@ -197,7 +197,7 @@ def get_protein_sequence(uniprot_id: str) -> Optional[str]:
         return None
 
 
-def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str, cache: dict) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str, cache: dict) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
     """
     Process one protein group to get human ortholog information.
     
@@ -205,10 +205,10 @@ def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str,
         group_df: DataFrame with all rows for this protein_id
         protein_id: UniProt protein ID
         species: 'mouse' or 'rat'
-        cache: Dictionary to cache API results (key: protein_id, value: (ortholog_id, ortholog_desc, ortholog_seq, error))
+        cache: Dictionary to cache API results (key: protein_id, value: (ortholog_id, ortholog_desc, ortholog_seq, source_desc, error))
         
     Returns:
-        Tuple of (human_ortholog_id, human_ortholog_description, human_ortholog_sequence, api_error)
+        Tuple of (human_ortholog_id, human_ortholog_description, human_ortholog_sequence, source_protein_description, api_error)
     """
     # Check cache first
     if protein_id in cache:
@@ -218,6 +218,7 @@ def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str,
     human_ortholog_id = None
     human_ortholog_description = None
     human_ortholog_sequence = None
+    source_protein_description = None
     
     try:
         # Step 1: Get UniProt entry and extract gene ID
@@ -227,14 +228,22 @@ def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str,
         
         if not uniprot_data:
             api_error = f"Failed to fetch UniProt entry for {protein_id}"
-            result = (None, None, None, api_error)
+            result = (None, None, None, None, api_error)
             cache[protein_id] = result
             return result
+        
+        # Extract source protein description (always do this, regardless of ortholog mapping success)
+        try:
+            source_protein_description = uniprot_data.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value', '')
+            if source_protein_description:
+                logger.info(f"  Source protein: {source_protein_description}")
+        except (KeyError, AttributeError):
+            pass
         
         gene_id = extract_gene_id(uniprot_data, species)
         if not gene_id:
             api_error = f"No {species} gene ID (MGI/RGD) found in UniProt entry for {protein_id}"
-            result = (None, None, None, api_error)
+            result = (None, None, None, source_protein_description, api_error)
             cache[protein_id] = result
             return result
         
@@ -247,7 +256,7 @@ def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str,
         
         if not hgnc_id:
             api_error = f"No human ortholog found in Alliance Genome for {gene_id}"
-            result = (None, None, None, api_error)
+            result = (None, None, None, source_protein_description, api_error)
             cache[protein_id] = result
             return result
         
@@ -260,7 +269,7 @@ def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str,
         
         if not human_uniprot_id:
             api_error = f"No human UniProt ID found for {hgnc_id}"
-            result = (None, None, None, api_error)
+            result = (None, None, None, source_protein_description, api_error)
             cache[protein_id] = result
             return result
         
@@ -280,14 +289,14 @@ def process_protein_group(group_df: pd.DataFrame, protein_id: str, species: str,
         if human_ortholog_sequence:
             logger.info(f"  Human sequence length: {len(human_ortholog_sequence)} amino acids")
         
-        result = (human_ortholog_id, human_ortholog_description, human_ortholog_sequence, None)
+        result = (human_ortholog_id, human_ortholog_description, human_ortholog_sequence, source_protein_description, None)
         cache[protein_id] = result
         return result
         
     except Exception as e:
         api_error = f"Unexpected error processing {protein_id}: {str(e)}"
         logger.error(api_error)
-        result = (None, None, None, api_error)
+        result = (None, None, None, source_protein_description, api_error)
         cache[protein_id] = result
         return result
 
@@ -386,7 +395,7 @@ def main():
         group_df = df[group_mask]
         
         # Process the protein group
-        human_ortholog_id, human_ortholog_description, human_ortholog_sequence, api_error = process_protein_group(
+        human_ortholog_id, human_ortholog_description, human_ortholog_sequence, source_protein_description, api_error = process_protein_group(
             group_df, protein_id, args.species, cache
         )
         
@@ -396,17 +405,9 @@ def main():
         df.loc[group_mask, 'human_ortholog_sequence'] = human_ortholog_sequence
         df.loc[group_mask, 'api_error'] = api_error
         
-        # Also get and update UniProt description for source protein
-        if not api_error:
-            uniprot_data = get_uniprot_entry(protein_id)
-            time.sleep(API_DELAY)
-            if uniprot_data:
-                try:
-                    source_desc = uniprot_data.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value', '')
-                    if source_desc:
-                        df.loc[group_mask, 'uniprot_protein_description'] = source_desc
-                except (KeyError, AttributeError):
-                    pass
+        # Always update source protein description from UniProt (regardless of ortholog mapping success)
+        if source_protein_description:
+            df.loc[group_mask, 'uniprot_protein_description'] = source_protein_description
         
         if api_error:
             failed += 1
