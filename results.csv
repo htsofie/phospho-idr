@@ -1,0 +1,48 @@
+Identity Analysis Results
+Reference sequence,Q8WYJ6
+Aligned sequence,P42209
+
+Summary
+Matches,34
+Mismatches,1
+Gaps,0
+Not found,0
+Total positions,35
+Identity percentage,97.14%
+
+Reference_Position,Aligned_Position,Status,Ref_AA,Aligned_AA
+33,28,match,L,L
+34,29,match,M,M
+35,30,match,V,V
+60,55,match,Q,Q
+62,57,match,P,P
+63,58,mismatch,E,D
+94,89,match,D,D
+95,90,match,T,T
+96,91,match,P,P
+144,139,match,Y,Y
+145,140,match,F,F
+146,141,match,I,I
+149,144,match,F,F
+150,145,match,G,G
+151,146,match,R,R
+171,166,match,I,I
+173,168,match,V,V
+174,169,match,I,I
+175,170,match,G,G
+176,171,match,K,K
+177,172,match,A,A
+178,173,match,D,D
+179,174,match,A,A
+186,181,match,Q,Q
+231,226,match,A,A
+232,227,match,V,V
+245,239,match,R,R
+246,240,match,P,P
+247,241,match,V,V
+248,242,match,R,R
+249,243,match,G,G
+250,244,match,R,R
+251,245,match,R,R
+258,252,match,E,E
+259,253,match,V,V
