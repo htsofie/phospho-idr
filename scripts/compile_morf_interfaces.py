@@ -399,23 +399,35 @@ def main() -> None:
     # Step 2: Map IDs (optional)
     if not args.no_map:
         morf_df = map_all_ids_to_uniprot(morf_df)
+    else:
+        # Even without mapping, create uniprot_id column for UniProt IDs
+        morf_df["uniprot_id"] = None
+        morf_df["mapping_error"] = None
+        uniprot_mask = morf_df["database_type"] == "uniprot"
+        morf_df.loc[uniprot_mask, "uniprot_id"] = morf_df.loc[uniprot_mask, "ID"]
+        logger.info(f"  Added uniprot_id for {uniprot_mask.sum()} UniProt entries (mapping skipped)")
 
-    # Save compiled MoRF data
+    # Save compiled MoRF data (ALL proteins are included)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving compiled MoRF data to {output_path}...")
     morf_df.to_csv(output_path, index=False)
-    logger.info(f"✓ Successfully saved {len(morf_df)} rows")
+    logger.info(f"✓ Successfully saved {len(morf_df)} rows (all proteins included)")
 
     logger.info("")
     logger.info("=" * 80)
     logger.info("Summary")
     logger.info("=" * 80)
-    logger.info(f"Total MoRF entries: {len(morf_df)}")
+    logger.info(f"Total MoRF entries: {len(morf_df)} (ALL proteins from CV files included)")
     logger.info(f"  - UniProt IDs: {len(morf_df[morf_df['database_type'] == 'uniprot'])}")
     logger.info(f"  - Disprot IDs: {len(morf_df[morf_df['database_type'] == 'disprot'])}")
     logger.info(f"  - Ideal IDs: {len(morf_df[morf_df['database_type'] == 'ideal'])}")
     if "uniprot_id" in morf_df.columns:
-        logger.info(f"Successfully mapped IDs: {len(morf_df[morf_df['uniprot_id'].notna()])}")
+        mapped_count = len(morf_df[morf_df['uniprot_id'].notna()])
+        logger.info(f"IDs with uniprot_id: {mapped_count} (includes UniProt IDs + successfully mapped DisProt/IDEAL)")
+        if not args.no_map:
+            failed_count = len(morf_df[morf_df['mapping_error'].notna()])
+            if failed_count > 0:
+                logger.info(f"  - Failed mappings: {failed_count} (still included in output)")
     logger.info(f"Output file: {output_path}")
     logger.info("")
 
