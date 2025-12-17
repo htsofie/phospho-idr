@@ -343,15 +343,26 @@ def main():
     df = pd.read_csv(args.input)
     logger.info(f"Loaded {len(df)} rows")
     
-    # Check if manual_review column exists
+    # Check if manual_review column exists - make it optional
     if 'manual_review' not in df.columns:
-        logger.error("Error: 'manual_review' column not found. This script should run after blast.py or grouped_pipeline.py.")
-        return
-    
-    # Filter to only manual_review == TRUE
-    manual_review_mask = df['manual_review'] == True
-    rows_to_process = df[manual_review_mask]
-    logger.info(f"Found {len(rows_to_process)} rows with manual_review == TRUE")
+        logger.warning("'manual_review' column not found. Processing all rows and adding required columns.")
+        # Add required columns and set all rows to need processing
+        df['manual_review'] = True
+        df['match_method'] = ''
+        df['error_reason'] = ''
+        rows_to_process = df.copy()
+        logger.info(f"Processing all {len(rows_to_process)} rows")
+    else:
+        # Filter to only manual_review == TRUE
+        manual_review_mask = df['manual_review'] == True
+        rows_to_process = df[manual_review_mask]
+        logger.info(f"Found {len(rows_to_process)} rows with manual_review == TRUE")
+        
+        # Ensure match_method and error_reason columns exist
+        if 'match_method' not in df.columns:
+            df['match_method'] = ''
+        if 'error_reason' not in df.columns:
+            df['error_reason'] = ''
     
     if len(rows_to_process) == 0:
         logger.info("No rows to process. Exiting.")
@@ -381,7 +392,7 @@ def main():
     else:
         logger.info(f"Using existing BLAST database: {db_path}")
     
-    # Process protein groups (only those with manual_review == TRUE)
+    # Process protein groups
     protein_groups = rows_to_process.groupby('Protein')
     logger.info(f"Found {len(protein_groups)} protein groups to process")
     
@@ -540,13 +551,16 @@ def main():
     updated_df.to_csv(output_file, index=False)
     
     # Print summary
-    manual_review_count = updated_df['manual_review'].sum()
-    successful_count = len(updated_df) - manual_review_count
-    
-    logger.info(f"Processing complete:")
-    logger.info(f"  Total rows: {len(updated_df)}")
-    logger.info(f"  Successfully mapped: {successful_count}")
-    logger.info(f"  Manual review needed: {manual_review_count}")
+    if 'manual_review' in updated_df.columns:
+        manual_review_count = updated_df['manual_review'].sum()
+        successful_count = len(updated_df) - manual_review_count
+        logger.info(f"Processing complete:")
+        logger.info(f"  Total rows: {len(updated_df)}")
+        logger.info(f"  Successfully mapped: {successful_count}")
+        logger.info(f"  Manual review needed: {manual_review_count}")
+    else:
+        logger.info(f"Processing complete:")
+        logger.info(f"  Total rows: {len(updated_df)}")
 
 
 if __name__ == "__main__":
