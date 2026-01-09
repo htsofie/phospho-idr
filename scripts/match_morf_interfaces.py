@@ -114,27 +114,32 @@ def match_morf_to_orthologs(morf_df: pd.DataFrame, ortholog_df: pd.DataFrame) ->
         
         # Check if matches human_ortholog_id
         if uniprot_id in ortholog_by_human.index:
-            ortholog_row = ortholog_by_human.loc[uniprot_id]
+            ortholog_matches = ortholog_by_human.loc[uniprot_id]
             
             # Handle both Series (single row) and DataFrame (multiple rows) cases
-            if isinstance(ortholog_row, pd.DataFrame):
-                ortholog_row = ortholog_row.iloc[0]
+            if isinstance(ortholog_matches, pd.Series):
+                # Single match - convert to DataFrame for consistent processing
+                ortholog_matches = ortholog_matches.to_frame().T
+            # Now ortholog_matches is always a DataFrame
             
-            # Convert to dict to access all values, including index
-            row_dict = ortholog_row.to_dict()
-            # Add the index value (human_ortholog_id) to the dict
-            row_dict["human_ortholog_id"] = uniprot_id
+            # Create result rows for ALL protein_ids that have this human_ortholog_id
+            for idx, ortholog_row in ortholog_matches.iterrows():
+                # Convert to dict to access all values
+                row_dict = ortholog_row.to_dict()
+                # Add the human_ortholog_id (which is the index value)
+                row_dict["human_ortholog_id"] = uniprot_id
+                
+                result_rows.append({
+                    "protein_id": row_dict["protein_id"],
+                    "sequence": row_dict["sequence"],
+                    "length": row_dict.get("length", None),
+                    "morf_residues": None,
+                    "human_ortholog_id": row_dict["human_ortholog_id"],
+                    "human_ortholog_sequence": row_dict["human_ortholog_sequence"],
+                    "human_morf_residues": morf_residues,
+                })
             
-            result_rows.append({
-                "protein_id": row_dict["protein_id"],
-                "sequence": row_dict["sequence"],
-                "length": row_dict.get("length", None),
-                "morf_residues": None,
-                "human_ortholog_id": row_dict["human_ortholog_id"],
-                "human_ortholog_sequence": row_dict["human_ortholog_sequence"],
-                "human_morf_residues": morf_residues,
-            })
-            logger.info(f"  Matched {uniprot_id} to human_ortholog_id")
+            logger.info(f"  Matched {uniprot_id} to human_ortholog_id ({len(ortholog_matches)} protein_ids)")
     
     result_df = pd.DataFrame(result_rows)
     logger.info(f"  Total matches: {len(result_df)}")
@@ -175,7 +180,7 @@ def main():
         "--morf-csv",
         type=str,
         default=None,
-        help="Path to compiled MoRF interfaces CSV (default: data/morf_interfaces.csv)",
+        help="Path to compiled MoRF interfaces CSV (default: data/MoRF2/morf_interfaces.csv)",
     )
     
     args = parser.parse_args()
@@ -198,7 +203,7 @@ def main():
     if args.morf_csv:
         morf_csv_path = args.morf_csv
     else:
-        morf_csv_path = os.path.join(project_root, "data", "morf_interfaces.csv")
+        morf_csv_path = os.path.join(project_root, "data", "MoRF2", "morf_interfaces.csv")
     
     logger.info("=" * 80)
     logger.info("MoRF Interface Matching (using precompiled MoRF CSV)")

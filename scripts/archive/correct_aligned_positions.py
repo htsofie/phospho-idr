@@ -5,11 +5,14 @@ Simple Motif Position Corrector
 This script finds rows where position < 7 and updates the motif_position column
 to match the position value.
 
+This should be run BEFORE align_to_full_seq.py to fix motif_position values
+that will be used during alignment.
+
 Usage:
     python correct_aligned_positions.py input_csv [output_csv]
     
 Example:
-    python correct_aligned_positions.py data/processed/mouse/full_total_blast_aligned.csv data/processed/mouse/full_total_blast_aligned_corrected.csv
+    python correct_aligned_positions.py data/processed/mouse/full_total_blast.csv data/processed/mouse/full_total_blast_corrected.csv
 """
 
 import pandas as pd
@@ -103,8 +106,9 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: python correct_aligned_positions.py input_csv [output_csv]")
         print("\nExample:")
-        print("  python correct_aligned_positions.py data/processed/mouse/full_total_blast_aligned.csv")
-        print("  python correct_aligned_positions.py data/processed/mouse/full_total_blast_aligned.csv data/processed/mouse/full_total_blast_aligned_corrected.csv")
+        print("  python correct_aligned_positions.py data/processed/mouse/full_total_blast.csv")
+        print("  python correct_aligned_positions.py data/processed/mouse/full_total_blast.csv data/processed/mouse/full_total_blast_corrected.csv")
+        print("\nNote: This should be run BEFORE align_to_full_seq.py")
         sys.exit(1)
     
     input_file = sys.argv[1]

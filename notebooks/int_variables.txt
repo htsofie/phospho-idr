@@ -1,6 +1,0 @@
-mouse_data = pd.read_csv('../data/processed/mouse/human_ortholog_mapped.csv')
-rat_data = pd.read_csv('../data/processed/rat/human_ortholog_mapped.csv')
-
-mouse_int_df = pd.read_csv('../data/processed/mouse/aligned_interfaces.csv')
-rat_int_df = pd.read_csv('../data/processed/rat/aligned_interfaces.csv')
-

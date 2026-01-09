@@ -203,6 +203,41 @@ def compile_morf_data(fasta_files: List[str]) -> pd.DataFrame:
     return combined_df
 
 
+def get_uniprot_sequence(uniprot_id: str, cache: Dict[str, Optional[str]]) -> Optional[str]:
+    """
+    Fetch full protein sequence from UniProt REST API.
+    
+    Args:
+        uniprot_id: UniProt protein ID
+        cache: Dictionary to cache sequences
+        
+    Returns:
+        Protein sequence string or None if error
+    """
+    if uniprot_id in cache:
+        return cache[uniprot_id]
+    
+    url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id.strip()}"
+    
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        uniprot_data = response.json()
+        
+        # Extract sequence
+        sequence = uniprot_data.get('sequence', {}).get('value', '')
+        if sequence:
+            cache[uniprot_id] = sequence
+            return sequence
+        else:
+            cache[uniprot_id] = None
+            return None
+    except requests.exceptions.RequestException as e:
+        logger.debug(f"Error fetching UniProt sequence for {uniprot_id}: {e}")
+        cache[uniprot_id] = None
+        return None
+
+
 def map_id_to_uniprot(protein_id: str, from_db: str, cache: Dict[str, Optional[str]]) -> Optional[str]:
     """
     Map Disprot/Ideal ID to UniProt using UniProt ID Mapping API.
@@ -311,14 +346,18 @@ def map_id_to_uniprot(protein_id: str, from_db: str, cache: Dict[str, Optional[s
 def map_all_ids_to_uniprot(morf_df: pd.DataFrame) -> pd.DataFrame:
     """
     Map all Disprot/Ideal IDs to UniProt and add uniprot_id / mapping_error columns.
+    Also fetch UniProt sequences and compare with MoRF sequences.
     """
     logger.info("Mapping Disprot/Ideal IDs to UniProt...")
 
     morf_df = morf_df.copy()
     morf_df["uniprot_id"] = None
     morf_df["mapping_error"] = None
+    morf_df["uniprot_sequence"] = None
+    morf_df["sequence_match"] = None
 
-    cache: Dict[str, Optional[str]] = {}
+    id_cache: Dict[str, Optional[str]] = {}
+    sequence_cache: Dict[str, Optional[str]] = {}
 
     to_map = morf_df[morf_df["database_type"].isin(["disprot", "ideal"])]
     logger.info(f"  Found {len(to_map)} IDs to map")
@@ -329,21 +368,60 @@ def map_all_ids_to_uniprot(morf_df: pd.DataFrame) -> pd.DataFrame:
         from_db = "DisProt" if db_type == "disprot" else "IDEAL"
 
         logger.info(f"  Mapping {protein_id} ({from_db})...")
-        uniprot_id = map_id_to_uniprot(protein_id, from_db, cache)
+        uniprot_id = map_id_to_uniprot(protein_id, from_db, id_cache)
         time.sleep(API_DELAY)
 
         if uniprot_id:
             morf_df.at[idx, "uniprot_id"] = uniprot_id
             logger.info(f"    -> {uniprot_id}")
+            
+            # Fetch UniProt sequence
+            uniprot_sequence = get_uniprot_sequence(uniprot_id, sequence_cache)
+            time.sleep(API_DELAY)
+            
+            if uniprot_sequence:
+                morf_df.at[idx, "uniprot_sequence"] = uniprot_sequence
+                # Compare sequences
+                morf_sequence = row["sequence"]
+                if morf_sequence and uniprot_sequence:
+                    if morf_sequence.strip() == uniprot_sequence.strip():
+                        morf_df.at[idx, "sequence_match"] = "exact"
+                    else:
+                        morf_df.at[idx, "sequence_match"] = "not exact"
+                else:
+                    morf_df.at[idx, "sequence_match"] = "not exact"
+            else:
+                morf_df.at[idx, "sequence_match"] = "not exact"
         else:
             morf_df.at[idx, "mapping_error"] = f"Failed to map {protein_id} from {from_db}"
             logger.warning("    -> Mapping failed")
 
-    # For uniprot type, use original ID
+    # For uniprot type, use original ID and fetch sequence for comparison
     uniprot_mask = morf_df["database_type"] == "uniprot"
     morf_df.loc[uniprot_mask, "uniprot_id"] = morf_df.loc[uniprot_mask, "ID"]
+    
+    logger.info("  Fetching UniProt sequences for UniProt IDs and comparing...")
+    for idx, row in morf_df[uniprot_mask].iterrows():
+        uniprot_id = row["ID"]
+        uniprot_sequence = get_uniprot_sequence(uniprot_id, sequence_cache)
+        time.sleep(API_DELAY)
+        
+        if uniprot_sequence:
+            morf_df.at[idx, "uniprot_sequence"] = uniprot_sequence
+            # Compare sequences
+            morf_sequence = row["sequence"]
+            if morf_sequence and uniprot_sequence:
+                if morf_sequence.strip() == uniprot_sequence.strip():
+                    morf_df.at[idx, "sequence_match"] = "exact"
+                else:
+                    morf_df.at[idx, "sequence_match"] = "not exact"
+            else:
+                morf_df.at[idx, "sequence_match"] = "not exact"
+        else:
+            morf_df.at[idx, "sequence_match"] = "not exact"
 
     logger.info(f"  Mapping complete. {len(morf_df[morf_df['uniprot_id'].notna()])} IDs have UniProt mappings")
+    logger.info(f"  Sequence comparison complete. {len(morf_df[morf_df['sequence_match'] == 'exact'])} exact matches, {len(morf_df[morf_df['sequence_match'] == 'not exact'])} not exact")
     return morf_df
 
 
