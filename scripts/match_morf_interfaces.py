@@ -3,10 +3,9 @@
 Match MoRF residues to proteins in human_ortholog_mapped.csv.
 
 This script:
-1. Parses CV1-CV4 FASTA files to extract MoRF data
-2. Maps Disprot/Ideal IDs to UniProt using UniProt ID Mapping API
-3. Matches MoRF residues to proteins in human_ortholog_mapped.csv
-4. Generates matched_morfs.csv with matched data
+1. Uses precompiled CSV (default: data/MoRF2/morf_interfaces.csv) 
+2. Matches MoRF interface residues to proteins in human_ortholog_mapped.csv (either protein_id or human_ortholog_id)
+4. Generates matched_morfs.csv output file with
 
 Usage:
     python scripts/match_morf_interfaces.py --input data/processed/mouse/human_ortholog_mapped.csv --species mouse
