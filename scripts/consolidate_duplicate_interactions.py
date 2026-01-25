@@ -25,7 +25,7 @@ if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
 
 # Import functions from map_human_orthologs
-from map_human_orthologs import (
+from archive.map_human_orthologs import (
     get_uniprot_entry,
     extract_gene_id,
     get_human_ortholog_from_alliance,

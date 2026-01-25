@@ -1,0 +1,29 @@
+Missing PUNCH2 Predictions
+==============================
+Total missing: 21
+Success rate: 99.7%
+
+PUNCH2 Task ID: f3e2604a-1997-4029-a4c2-df9718cdcbc6
+
+Missing Protein IDs:
+A0A0H2UKB6
+E9PWT1
+E9PYI7
+E9Q8K4
+O35698
+O35737
+P10126
+P61327
+P68372
+P84075
+P84228
+Q3UXQ3
+Q5U4B1
+Q80W21
+Q80Z68
+Q8C2K8
+Q8C8Y2
+Q8CCT4
+Q921H8
+Q9CWF2
+Q9JMA7

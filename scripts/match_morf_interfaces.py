@@ -43,13 +43,13 @@ def load_and_group_ortholog_data(input_file: str) -> pd.DataFrame:
     logger.info(f"  Loaded {len(df)} rows")
     
     # Group by unique (protein_id, human_ortholog_id) pairs
-    # Keep: protein_id, sequence (from full_sequence), length, human_ortholog_id, human_ortholog_sequence
+    # Keep: protein_id, full_sequence (from full_sequence), length, human_ortholog_id, human_ortholog_sequence
     grouped = df.groupby(['protein_id', 'human_ortholog_id']).first().reset_index()
     
     # Extract required columns
     result_df = pd.DataFrame({
         'protein_id': grouped['protein_id'],
-        'sequence': grouped.get('full_sequence', grouped.get('sequence', '')),
+        'full_sequence': grouped.get('full_sequence', grouped.get('sequence', '')),
         'length': grouped.get('length', None),
         'human_ortholog_id': grouped['human_ortholog_id'],
         'human_ortholog_sequence': grouped.get('human_ortholog_sequence', '')
@@ -102,12 +102,12 @@ def match_morf_to_orthologs(morf_df: pd.DataFrame, ortholog_df: pd.DataFrame) ->
 
             result_rows.append({
                 "protein_id": row_dict["protein_id"],
-                "sequence": row_dict["sequence"],
+                "full_sequence": row_dict["full_sequence"],
                 "length": row_dict.get("length", None),
                 "morf_residues": morf_residues,
                 "human_ortholog_id": row_dict["human_ortholog_id"],
                 "human_ortholog_sequence": row_dict["human_ortholog_sequence"],
-                "human_morf_residues": None,
+                "human_phosphoprotein_IRES": None,
             })
             logger.info(f"  Matched {uniprot_id} to protein_id")
         
@@ -130,12 +130,12 @@ def match_morf_to_orthologs(morf_df: pd.DataFrame, ortholog_df: pd.DataFrame) ->
                 
                 result_rows.append({
                     "protein_id": row_dict["protein_id"],
-                    "sequence": row_dict["sequence"],
+                    "full_sequence": row_dict["full_sequence"],
                     "length": row_dict.get("length", None),
                     "morf_residues": None,
                     "human_ortholog_id": row_dict["human_ortholog_id"],
                     "human_ortholog_sequence": row_dict["human_ortholog_sequence"],
-                    "human_morf_residues": morf_residues,
+                    "human_phosphoprotein_IRES": morf_residues,
                 })
             
             logger.info(f"  Matched {uniprot_id} to human_ortholog_id ({len(ortholog_matches)} protein_ids)")
@@ -248,7 +248,7 @@ def main():
     logger.info(f"Total MoRF entries (from CSV): {len(morf_df)}")
     logger.info(f"Total matches: {len(matched_df)}")
     logger.info(f"  - Matches to protein_id: {len(matched_df[matched_df['morf_residues'].notna()])}")
-    logger.info(f"  - Matches to human_ortholog_id: {len(matched_df[matched_df['human_morf_residues'].notna()])}")
+    logger.info(f"  - Matches to human_ortholog_id: {len(matched_df[matched_df['human_phosphoprotein_IRES'].notna()])}")
     logger.info(f"Output file: {output_path}")
     logger.info("")
 

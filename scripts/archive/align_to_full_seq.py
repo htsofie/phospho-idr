@@ -6,8 +6,13 @@ Script to align cleaned_site_motif to full_sequence and calculate phosphorylatio
 import pandas as pd
 import argparse
 import os
+import requests
+import time
 from typing import Dict, Optional, Any, List, Tuple
 from Bio.Align import PairwiseAligner
+
+# API rate limiting delay (seconds)
+API_DELAY = 0.15
 
 
 def _compute_phospho_protein_pos_from_alignment(aln_prot: str, aln_pep: str, start: int, phospho_pos_in_peptide: int) -> Optional[int]:
@@ -166,7 +171,7 @@ def map_peptide_to_protein(protein_seq: str, peptide_seq: str, phospho_pos_in_pe
     return candidates[0]
 
 
-def process_alignment_row(row: pd.Series, try_all_candidates: bool = True) -> Dict[str, Any]:
+def process_alignment_row(row: pd.Series, try_all_candidates: bool = True, species: str = 'mouse') -> Dict[str, Any]:
     """Process a single row for alignment."""
     # Check required data - updated to work with grouped pipeline output
     if pd.isna(row.get('full_sequence')) or not row.get('full_sequence'):
@@ -195,7 +200,7 @@ def process_alignment_row(row: pd.Series, try_all_candidates: bool = True) -> Di
         
         if len(candidate_sequences) > 1 and len(candidate_sequences) == len(candidate_ids):
             # Try all candidates and find the best one
-            return process_row_with_multiple_candidates(row, candidate_sequences, candidate_ids, candidate_types, is_blast_mapped)
+            return process_row_with_multiple_candidates(row, candidate_sequences, candidate_ids, candidate_types, is_blast_mapped, species)
     
     # Single sequence processing (original logic)
     protein_seq = protein_seq_str.split(';')[0].strip() if ';' in protein_seq_str else protein_seq_str
@@ -256,8 +261,121 @@ def process_alignment_row(row: pd.Series, try_all_candidates: bool = True) -> Di
     return result
 
 
+def get_uniprot_protein_name(protein_id: str, cache: Dict[str, Optional[str]]) -> Optional[str]:
+    """
+    Fetch protein name from UniProt REST API.
+    
+    Args:
+        protein_id: UniProt protein ID (e.g., 'P46638')
+        cache: Dictionary to cache results (key: protein_id, value: protein_name)
+        
+    Returns:
+        Protein name string or None if error
+    """
+    # Check cache first
+    if protein_id in cache:
+        return cache[protein_id]
+    
+    url = f"https://rest.uniprot.org/uniprotkb/{protein_id.strip()}"
+    
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        uniprot_data = response.json()
+        
+        # Extract protein name
+        protein_name = uniprot_data.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value', '')
+        if protein_name:
+            cache[protein_id] = protein_name
+            return protein_name
+        else:
+            cache[protein_id] = None
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"      Warning: Error fetching UniProt name for {protein_id}: {e}")
+        cache[protein_id] = None
+        return None
+
+
+def break_tie_with_protein_name(candidates: List[Dict[str, Any]], protein_description: str, name_cache: Dict[str, Optional[str]], species: str = 'mouse') -> Dict[str, Any]:
+    """
+    Break ties between candidates by comparing UniProt protein names with CSV protein_description.
+    
+    Handles semicolon-separated lists in protein_description:
+    - For rat: If both SP protein descriptions are in the list, use position in list as tie-breaker (after position_difference)
+    - If not present (or not rat), choose the one with smallest position_difference
+    - If position_difference is the same, choose the longest sequence
+    
+    Args:
+        candidates: List of candidate dictionaries (must have same is_exact and identity)
+        protein_description: Protein description from CSV column (may be semicolon-separated list)
+        name_cache: Cache for UniProt protein names
+        species: Species name ('mouse' or 'rat') - only rat uses position in CSV list
+        
+    Returns:
+        Best candidate dictionary
+    """
+    if not candidates:
+        return None
+    
+    if len(candidates) == 1:
+        return candidates[0]
+    
+    # Parse protein_description as semicolon-separated list
+    if protein_description and not pd.isna(protein_description):
+        csv_descriptions = [desc.strip() for desc in str(protein_description).split(';') if desc.strip()]
+        csv_descriptions_lower = [desc.lower() for desc in csv_descriptions]
+    else:
+        csv_descriptions = []
+        csv_descriptions_lower = []
+    
+    # Get UniProt names for all candidates
+    for candidate in candidates:
+        protein_id = candidate['id']
+        uniprot_name = get_uniprot_protein_name(protein_id, name_cache)
+        time.sleep(API_DELAY)  # Rate limiting
+        
+        candidate['uniprot_name'] = uniprot_name
+        candidate['uniprot_name_lower'] = uniprot_name.lower() if uniprot_name else None
+    
+    # Find candidates whose UniProt name appears in the CSV description list
+    matching_candidates = []
+    for candidate in candidates:
+        uniprot_name_lower = candidate.get('uniprot_name_lower')
+        if uniprot_name_lower and csv_descriptions_lower:
+            # Check if UniProt name is contained in any of the CSV descriptions (case-insensitive)
+            # Try exact match first, then substring match
+            for idx, csv_desc_lower in enumerate(csv_descriptions_lower):
+                if uniprot_name_lower == csv_desc_lower or uniprot_name_lower in csv_desc_lower or csv_desc_lower in uniprot_name_lower:
+                    candidate['match_index'] = idx  # Store position in list
+                    matching_candidates.append(candidate)
+                    break
+    
+    # If we have matches and it's rat, use position in CSV list as tie-breaker
+    if matching_candidates and species == 'rat':
+        # For rat: Sort by position_difference (smaller = better), then by position in CSV list (first = best), then by sequence length (longer = better)
+        matching_candidates.sort(key=lambda x: (x.get('position_difference', 999), x.get('match_index', 999), -x.get('sequence_length', 0)))
+        best = matching_candidates[0]
+        match_pos = best.get('match_index', -1)
+        matched_desc = csv_descriptions[match_pos] if match_pos >= 0 else 'N/A'
+        print(f"      Tie-breaker: Selected {best['id']} (pos_diff: {best.get('position_difference', 0)}, matches protein_description at position {match_pos + 1}: '{matched_desc}')")
+        return best
+    elif matching_candidates:
+        # For mouse: Sort by position_difference (smaller = better), then by sequence length (longer = better) - ignore match_index
+        matching_candidates.sort(key=lambda x: (x.get('position_difference', 999), -x.get('sequence_length', 0)))
+        best = matching_candidates[0]
+        print(f"      Tie-breaker: Selected {best['id']} (pos_diff: {best.get('position_difference', 0)}, length: {best.get('sequence_length', 0)}, matches protein_description but not using position in list for mouse)")
+        return best
+    else:
+        # No matches found, use position_difference as tie-breaker (smaller = better), then sequence length (longer = better)
+        candidates.sort(key=lambda x: (x.get('position_difference', 999), -x.get('sequence_length', 0)))
+        best = candidates[0]
+        print(f"      Tie-breaker: Selected {best['id']} (smallest position difference: {best.get('position_difference', 0)}, length: {best.get('sequence_length', 0)}, no match in protein_description)")
+        return best
+
+
 def process_row_with_multiple_candidates(row: pd.Series, candidate_sequences: List[str], 
-                                         candidate_ids: List[str], candidate_types: List[str], is_blast_mapped: bool) -> Dict[str, Any]:
+                                         candidate_ids: List[str], candidate_types: List[str], is_blast_mapped: bool, species: str = 'mouse') -> Dict[str, Any]:
     """Try all candidate IDs/sequences and return the best alignment."""
     print(f"    Trying {len(candidate_sequences)} candidate IDs/sequences for best alignment...")
     
@@ -337,27 +455,44 @@ def process_row_with_multiple_candidates(row: pd.Series, candidate_sequences: Li
     
     # Select best candidate based on new logic
     if valid_candidates:
+        # Cache for UniProt protein names (to avoid repeated API calls)
+        name_cache: Dict[str, Optional[str]] = {}
+        
+        # Get protein_description from row for tie-breaking
+        protein_description = row.get('protein_description', '')
+        
         # Check if we have any SwissProt candidates
         sp_candidates = [c for c in valid_candidates if c['type'] == 'sp']
         tr_candidates = [c for c in valid_candidates if c['type'] == 'tr']
         
         # If we have SwissProt candidates, prioritize them
         if sp_candidates:
-            # Among SwissProt, prefer exact matches, then highest identity
+            # Sort by exact match and identity
             sp_candidates.sort(key=lambda x: (x['is_exact'], x['identity']), reverse=True)
-            best_candidate_info = sp_candidates[0]
-        else:
-            # No SwissProt, check if all TremBL have exact matches
-            all_tr_exact = all(c['is_exact'] for c in tr_candidates)
             
-            if all_tr_exact and len(tr_candidates) > 1:
-                # All TremBL have exact matches - choose longest sequence
-                tr_candidates.sort(key=lambda x: x['sequence_length'], reverse=True)
-                best_candidate_info = tr_candidates[0]
-                print(f"      All TremBL candidates have exact matches - selecting longest sequence: {best_candidate_info['id']} (length: {best_candidate_info['sequence_length']})")
+            # Check for ties (same is_exact and identity)
+            best_key = (sp_candidates[0]['is_exact'], sp_candidates[0]['identity'])
+            tied_candidates = [c for c in sp_candidates if (c['is_exact'], c['identity']) == best_key]
+            
+            if len(tied_candidates) > 1:
+                # Use tie-breaker: protein name matching, then sequence length
+                print(f"      {len(tied_candidates)} Swiss-Prot candidates tied - using tie-breaker...")
+                best_candidate_info = break_tie_with_protein_name(tied_candidates, protein_description, name_cache, species)
             else:
-                # Not all exact, or only one candidate - prefer exact matches, then highest identity
-                tr_candidates.sort(key=lambda x: (x['is_exact'], x['identity']), reverse=True)
+                best_candidate_info = sp_candidates[0]
+        else:
+            # No SwissProt, process TremBL candidates
+            tr_candidates.sort(key=lambda x: (x['is_exact'], x['identity']), reverse=True)
+            
+            # Check for ties
+            best_key = (tr_candidates[0]['is_exact'], tr_candidates[0]['identity'])
+            tied_candidates = [c for c in tr_candidates if (c['is_exact'], c['identity']) == best_key]
+            
+            if len(tied_candidates) > 1:
+                # Use tie-breaker: protein name matching, then sequence length
+                print(f"      {len(tied_candidates)} TremBL candidates tied - using tie-breaker...")
+                best_candidate_info = break_tie_with_protein_name(tied_candidates, protein_description, name_cache, species)
+            else:
                 best_candidate_info = tr_candidates[0]
         
         best_candidate_result = best_candidate_info['result']
@@ -417,7 +552,7 @@ def process_dataset(input_path: str, species: str, output_path: str) -> None:
         for idx, row in group_df.iterrows():
             print(f"  Processing phosphosite {idx + 1}")
             
-            alignment_result = process_alignment_row(row)
+            alignment_result = process_alignment_row(row, species=species)
             
             # Check if a different candidate was selected
             if alignment_result.get('selected_id') and alignment_result.get('selected_sequence'):

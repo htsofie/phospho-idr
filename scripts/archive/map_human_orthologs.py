@@ -366,14 +366,20 @@ def main():
         logger.error(f"Available columns: {list(df.columns)}")
         return
     
-    # Initialize new columns
-    df['human_ortholog_id'] = None
-    df['human_ortholog_description'] = None
-    df['human_ortholog_sequence'] = None
-    df['api_error'] = None
+    # Preserve original row order by adding an index column
+    df['_original_index'] = range(len(df))
     
-    # Also store UniProt description for source protein
-    df['uniprot_protein_description'] = None
+    # Initialize new columns if they don't exist
+    if 'human_ortholog_id' not in df.columns:
+        df['human_ortholog_id'] = None
+    if 'human_ortholog_description' not in df.columns:
+        df['human_ortholog_description'] = None
+    if 'human_ortholog_sequence' not in df.columns:
+        df['human_ortholog_sequence'] = None
+    if 'api_error' not in df.columns:
+        df['api_error'] = None
+    if 'uniprot_protein_description' not in df.columns:
+        df['uniprot_protein_description'] = None
     
     # Group by protein_id
     unique_proteins = df['protein_id'].unique()
@@ -386,6 +392,7 @@ def main():
     # Process each unique protein_id
     successful = 0
     failed = 0
+    skipped = 0
     
     for idx, protein_id in enumerate(unique_proteins, 1):
         logger.info(f"[{idx}/{len(unique_proteins)}] Processing protein: {protein_id}")
@@ -393,6 +400,19 @@ def main():
         # Get group of rows with this protein_id
         group_mask = df['protein_id'] == protein_id
         group_df = df[group_mask]
+        
+        # Check if all rows in this group already have complete human ortholog information
+        has_complete_data = (
+            group_df['human_ortholog_id'].notna().all() and
+            group_df['human_ortholog_description'].notna().all() and
+            group_df['human_ortholog_sequence'].notna().all()
+        )
+        
+        if has_complete_data:
+            logger.info(f"  → Skipping {protein_id}: All rows already have complete human ortholog data")
+            skipped += 1
+            logger.info("")
+            continue
         
         # Process the protein group
         human_ortholog_id, human_ortholog_description, human_ortholog_sequence, source_protein_description, api_error = process_protein_group(
@@ -424,11 +444,14 @@ def main():
     # Remove temporary column
     df = df.drop(columns=['uniprot_protein_description'])
     
+    # Restore original row order BEFORE column reordering
+    df = df.sort_values('_original_index')
+    
     # Reorder columns: insert new columns after protein_description
     cols = list(df.columns)
     
-    # Remove new columns from their current positions
-    for col in ['human_ortholog_id', 'human_ortholog_description', 'human_ortholog_sequence', 'api_error']:
+    # Remove temporary index column and new columns from their current positions
+    for col in ['_original_index', 'human_ortholog_id', 'human_ortholog_description', 'human_ortholog_sequence', 'api_error']:
         if col in cols:
             cols.remove(col)
     
@@ -446,7 +469,7 @@ def main():
     # Add api_error at the end
     cols.append('api_error')
     
-    # Reorder dataframe
+    # Reorder dataframe columns (excluding _original_index which will be dropped)
     df = df[cols]
     
     # Save to output file
@@ -463,7 +486,9 @@ def main():
     logger.info("=" * 80)
     logger.info("Summary")
     logger.info("=" * 80)
-    logger.info(f"Total proteins processed: {len(unique_proteins)}")
+    logger.info(f"Total proteins: {len(unique_proteins)}")
+    logger.info(f"Skipped (already had complete data): {skipped}")
+    logger.info(f"Processed: {successful + failed}")
     logger.info(f"Successful mappings: {successful}")
     logger.info(f"Failed mappings: {failed}")
     logger.info(f"Output file: {output_path}")
